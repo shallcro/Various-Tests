@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
+# Python 3
 
 """
 
@@ -35,7 +36,12 @@ import glob
 # from dfxml project
 import Objects
 
-def check_premis(premis_list, term, key_term):
+def check_premis(term, key_term):
+    #check to see if an event is already in our premis list--i.e., it's been successfully completed.
+ 
+    #set up premis_list
+    premis_list = pickleLoad('premis_list')
+    
     #check to see if an event is already in our premis list--i.e., it's been successfully completed.
     s = set((i['%s' % key_term] for i in premis_list))
     
@@ -130,7 +136,7 @@ def createFolders():
         if exception.errno != errno.EEXIST:
             raise
     
-def cPickle_load(list_name):
+def pickleLoad(list_name):
     temp_file = os.path.join(bdpl_vars()['temp_dir'], '%s.txt' % list_name)
     if list_name == "premis_list":
         temp_list = []
@@ -142,7 +148,7 @@ def cPickle_load(list_name):
             temp_list = pickle.load(file)
     return temp_list
 
-def cPickle_dump(list_name, list_contents):
+def pickleDump(list_name, list_contents):
     temp_dir = bdpl_vars()['temp_dir']
     temp_file = os.path.join(temp_dir, '%s.txt' % list_name)
      
@@ -187,9 +193,9 @@ def secureCopy(file_source, file_destination):
         migrate_exit = subprocess.call(log_cmd, stdout=output, shell=True, text=True)
     
     #capture premis
-    premis_list = cPickle_load('premis_list')
+    premis_list = pickleLoad('premis_list')
     premis_list.append(premis_dict(timestamp, 'replication', exitcode, copycmd, migrate_ver))
-    cPickle_dump('premis_list', premis_list)
+    pickleDump('premis_list', premis_list)
     
     print('\n\nFILE REPLICATION COMPLETED; PROCEED TO NEXT STEP.')
 
@@ -198,7 +204,7 @@ def ddrescue_image(temp_dir, log_dir, imagefile, image_dir):
     print('\n\nDISK IMAGE CREATION: DDRESCUE\n\tSOURCE: %s \n\tDESTINATION: %s\n\n' % (sourceDevice.get(), imagefile))
     
     #set up premis list
-    premis_list = cPickle_load('premis_list')
+    premis_list = pickleLoad('premis_list')
     
     #create variables for mapfile and ddrescue commands (first and second passes)
     mapfile = os.path.join(temp_dir, '%s.map' % barcode.get())
@@ -221,10 +227,7 @@ def ddrescue_image(temp_dir, log_dir, imagefile, image_dir):
 
     exitcode1 = subprocess.call(copycmd1, shell=True, text=True)
     
-    if checkFiles(image_dir):
-        if os.stat(imagefile).st_size > 0:
-            exitcode1 = 0
-            premis_list.append(premis_dict(timestamp1, 'disk image creation', exitcode1, copycmd1, migrate_ver))
+    premis_list.append(premis_dict(timestamp1, 'disk image creation', exitcode1, copycmd1, migrate_ver))
     
     #new timestamp for second pass (recommended by ddrescue developers)
     timestamp2 = str(datetime.datetime.now())
@@ -244,7 +247,7 @@ def ddrescue_image(temp_dir, log_dir, imagefile, image_dir):
         print('\n\nDISK IMAGE CREATION FAILED\n\n\tIndicate any issues in note to collecting unit.')
     
     #save premis
-    cPickle_dump('premis_list', premis_list)
+    pickleDump('premis_list', premis_list)
 
 def mediaCheck():
     if mediaStatus.get() == False:
@@ -291,7 +294,7 @@ def TransferContent():
             print('\n\n\DISK IMAGE CREATION: DeviceSideData FC5025\n\tSOURCE: %s \n\tDESTINATION: %s\n\n' % (sourceDevice.get(), imagefile))
             
             #create premis list
-            premis_list = cPickle_load('premis_list')
+            premis_list = pickleLoad('premis_list')
             
             disk_type_options = { 'Apple DOS 3.3 (16-sector)' : 'apple33', 'Apple DOS 3.2 (13-sector)' : 'apple32', 'Apple ProDOS' : 'applepro', 'Commodore 1541' : 'c1541', 'TI-99/4A 90k' : 'ti99', 'TI-99/4A 180k' : 'ti99ds180', 'TI-99/4A 360k' : 'ti99ds360', 'Atari 810' : 'atari810', 'MS-DOS 1200k' : 'msdos12', 'MS-DOS 360k' : 'msdos360', 'North Star MDS-A-D 175k' : 'mdsad', 'North Star MDS-A-D 350k' : 'mdsad350', 'Kaypro 2 CP/M 2.2' : 'kaypro2', 'Kaypro 4 CP/M 2.2' : 'kaypro4', 'CalComp Vistagraphics 4500' : 'vg4500', 'PMC MicroMate' : 'pmc', 'Tandy Color Computer Disk BASIC' : 'coco', 'Motorola VersaDOS' : 'versa' }
   
@@ -314,7 +317,7 @@ def TransferContent():
             print('\n\nDISK IMAGE CREATION COMPLETED.')
             
             #save premis
-            cPickle_dump('premis_list', premis_list)
+            pickleDump('premis_list', premis_list)
         
         else:
             
@@ -350,7 +353,7 @@ def TransferContent():
         ddrescue_image(temp_dir, log_dir, imagefile, image_dir)
         
         #set up PREMIS list
-        premis_list = cPickle_load('premis_list')
+        premis_list = pickleLoad('premis_list')
         
         #rip copies of each title with ffmpeg        
         ffmpeg_source = "%s\\" % optical_drive_letter()
@@ -411,7 +414,7 @@ def TransferContent():
                 shutil.move(ffmpeglog, os.path.join(log_dir, '%s-%s-ffmpeg.log' % (barcode.get(), str(title).zfill(2))))
         
         #save PREMIS to file       
-        cPickle_dump('premis_list', premis_list)
+        pickleDump('premis_list', premis_list)
         
         #move back to original directory
         os.chdir(bdpl_cwd)
@@ -424,7 +427,7 @@ def TransferContent():
             return
         
         #set up PREMIS list
-        premis_list = cPickle_load('premis_list')
+        premis_list = pickleLoad('premis_list')
 
         print('\n\nDISK IMAGE CREATION: CDRDAO\n\tSOURCE: %s \n\tDESTINATION: %s' % (sourceDevice.get(), image_dir))
         
@@ -449,18 +452,21 @@ def TransferContent():
 
         #read log file to determine # of sessions on disk.
         with open(disk_info_log, 'r') as f:
-            sessions = int(f.read().splitlines()[21].split(':')[1].strip())
+            for line in f:
+                if 'Sessions             :' in line:
+                    sessions = int(line.split(':')[1].strip())
         
         t2c_ver = subprocess.check_output('toc2cue -V', shell=True, text=True).strip()
         
         #for each session, create a bin/toc file
         for x in range(1, (sessions+1)):
-            cdr_bin = os.path.join(image_dir, "%s-%s.bin") % (barcode.get(), str(sessions).zfill(2))
-            cdr_toc = os.path.join(image_dir, "%s-%s.toc") % (barcode.get(), str(sessions).zfill(2))
+            cdr_bin = os.path.join(image_dir, "%s-%s.bin") % (barcode.get(), str(x).zfill(2))
+            cdr_toc = os.path.join(image_dir, "%s-%s.toc") % (barcode.get(), str(x).zfill(2))
             
             print('\n\n\tGenerating session %s of %s: %s\n\n' % (str(x), str(sessions), cdr_bin))
             
-            cdr_cmd = 'cdrdao read-cd --read-raw --datafile %s --device %s --driver generic-mmc-raw -v 1 %s' % (cdr_bin, drive_id, cdr_toc)
+            #create separate bin/cue for each session
+            cdr_cmd = 'cdrdao read-cd --read-raw --session %s --datafile %s --device %s --driver generic-mmc-raw -v 1 %s' % (str(x), cdr_bin, drive_id, cdr_toc)
             
             timestamp = str(datetime.datetime.now())
             
@@ -476,7 +482,7 @@ def TransferContent():
             
             premis_list.append(premis_dict(timestamp, 'metadata modification', exitcode2, t2c_cmd, t2c_ver))
             
-            #place a copy of the .cue file in files_dir for the forthcoming WAV
+            #place a copy of the .cue file for the first session in files_dir for the forthcoming WAV; this session will have audio data
             if x == 1:
                 shutil.copy(cue, os.path.join(files_dir, '%s.cue' % barcode.get()))
         
@@ -505,7 +511,7 @@ def TransferContent():
         premis_list.append(premis_dict(timestamp, 'disk image creation', exitcode, paranoia_cmd, paranoia_ver))
         
         #save PREMIS to file
-        cPickle_dump('premis_list', premis_list)
+        pickleDump('premis_list', premis_list)
         
         print('AUDIO NORMALIZATION COMPLETE; PROCEED TO NEXT STEP')
         
@@ -550,9 +556,9 @@ def carvefiles(carve_ver, carve_cmd, tool, location1, location2):
         return
     
     #save preservation event to PREMIS
-    premis_list = cPickle_load('premis_list')
+    premis_list = pickleLoad('premis_list')
     premis_list.append(premis_dict(timestamp, 'replication', pipes.returncode, carve_cmd, carve_ver))
-    cPickle_dump('premis_list', premis_list)
+    pickleDump('premis_list', premis_list)
     
 def time_to_int(str_time):
     """ Convert datetime to unix integer value """
@@ -616,15 +622,20 @@ def fix_dates(files_dir, dfxml_output):
     except ValueError:
        pass
     
-    premis_list = cPickle_load('premis_list')
+    premis_list = pickleLoad('premis_list')
         
     premis_list.append(premis_dict(timestamp, 'metadata modification (timestamp correction)', '0', 'https://github.com/CCA-Public/diskimageprocessor/blob/master/diskimageprocessor.py#L446-L489', 'Adapted from Disk Image Processor Version: 1.0.0 (Tim Walsh)'))
 
-    cPickle_dump('premis_list', premis_list)
+    pickleDump('premis_list', premis_list)
 
 def run_antivirus(files_dir, log_dir, metadata):
     
     print('\n\nVIRUS SCAN: MpCmdRun.exe\n\n')
+    
+    #return if virus scan already run
+    if check_premis('virus check', 'eventType'):
+        print('\n\nVirus scan already completed.')
+        return
     
     virus_log = os.path.join(log_dir, 'viruscheck-log.txt')
     
@@ -658,7 +669,7 @@ def run_antivirus(files_dir, log_dir, metadata):
     os.remove(defender_ascii)
     
     #write info to appraisal_dict
-    appraisal_dict = cPickle_load('appraisal_dict')
+    appraisal_dict = pickleLoad('appraisal_dict')
         
     if "found no threats" not in open(virus_log).read():
         appraisal_dict['Virus'] = 'WARNING! Virus or malware found; see %s.' % virus_log
@@ -667,16 +678,21 @@ def run_antivirus(files_dir, log_dir, metadata):
         appraisal_dict['Virus'] = 'No virus or malware identified.'
 
         
-    cPickle_dump('appraisal_dict', appraisal_dict)
+    pickleDump('appraisal_dict', appraisal_dict)
     
     #save preservation to PREMIS
-    premis_list = cPickle_load('premis_list')
+    premis_list = pickleLoad('premis_list')
     premis_list.append(premis_dict(timestamp, 'virus check', exitcode, av_command, av_ver))
-    cPickle_dump('premis_list', premis_list)
+    pickleDump('premis_list', premis_list)
    
 
 def run_bulkext(bulkext_dir, bulkext_log, files_dir, html, reports_dir):
     print('\n\nSENSITIVE DATA SCAN: BULK_EXTRACTOR')
+    
+    #return if b_e was run before
+    if check_premis('PII scan', 'eventType'):
+        print('\n\nSensitive data scan already completed.')
+        return
     
     try:
         os.makedirs(bulkext_dir)
@@ -698,9 +714,9 @@ def run_bulkext(bulkext_dir, bulkext_log, files_dir, html, reports_dir):
     except subprocess.CalledProcessError as e:
         be_ver = e.output
        
-    premis_list = cPickle_load('premis_list')       
+    premis_list = pickleLoad('premis_list')       
     premis_list.append(premis_dict(timestamp, 'PII scan', exitcode, bulkext_command, be_ver.rstrip()))
-    cPickle_dump('premis_list', premis_list)
+    pickleDump('premis_list', premis_list)
     
     #create a cumulative BE report
     cumulative_report = os.path.join(bulkext_dir, 'cumulative.txt')
@@ -740,11 +756,11 @@ def run_siegfried(files_dir, reports_dir, siegfried_version):
     
     exitcode = subprocess.call(sf_command, shell=True, text=True)
     
-    premis_list = cPickle_load('premis_list')
+    premis_list = pickleLoad('premis_list')
     
     premis_list.append(premis_dict(timestamp, 'format identification', exitcode, sf_command, siegfried_version))
     
-    cPickle_dump('premis_list', premis_list)
+    pickleDump('premis_list', premis_list)
 
 def import_csv(cursor, conn, reports_dir):
     """Import csv file into sqlite db"""
@@ -889,7 +905,7 @@ def write_html(header, path, file_delimiter, html):
     pii_list = []
     if header == 'Personally Identifiable Information (PII)':
         
-        appraisal_dict = cPickle_load('appraisal_dict')
+        appraisal_dict = pickleLoad('appraisal_dict')
         
         #check that there are any PII results
         if os.stat(path).st_size > 0:
@@ -941,7 +957,7 @@ def write_html(header, path, file_delimiter, html):
             html.write('\nNone found.')
             appraisal_dict['PII'] = 'No PII identified'
         
-        cPickle_dump('appraisal_dict', appraisal_dict)
+        pickleDump('appraisal_dict', appraisal_dict)
 
     # if writing duplicates, handle separately
     elif header == 'Duplicates':
@@ -1260,16 +1276,16 @@ def get_stats(files_dir, scan_started, cursor, html, siegfried_version, reports_
     html.write('\n<div class="card-body">')
     
     #save information to appraisal_dict
-    appraisal_dict = cPickle_load('appraisal_dict')
+    appraisal_dict = pickleLoad('appraisal_dict')
             
     date_range = '%s to %s' % (begin_date, end_date)
     appraisal_dict.update({'Source': barcode.get(), 'Dates': date_range, 'Extent': size, 'Files': num_files, 'Duplicates': distinct_dupes, 'FormatCount': num_formats, 'Unidentified':unidentified_files})  
     
-    cPickle_dump('appraisal_dict', appraisal_dict)
+    pickleDump('appraisal_dict', appraisal_dict)
     
 def print_premis(premis_path):   
     
-    premis_list = cPickle_load('premis_list')
+    premis_list = pickleLoad('premis_list')
     
     attr_qname = ET.QName("http://www.w3.org/2001/XMLSchema-instance", "schemaLocation")
 
@@ -1372,8 +1388,11 @@ def checkFiles(some_dir):
         return True
 
 def produce_dfxml(target):
-
     dfxml_output = bdpl_vars()['dfxml_output']
+    
+    #check if the output file exists AND if the action was recorded in PREMIS; if so, return
+    if os.path.exists(dfxml_output) and check_premis('message digest calculation', 'eventType'):
+        return
     
     timestamp = str(datetime.datetime.now())
     
@@ -1400,9 +1419,9 @@ def produce_dfxml(target):
         return
     
     #save PREMIS
-    premis_list = cPickle_load('premis_list')        
+    premis_list = pickleLoad('premis_list')        
     premis_list.append(premis_dict(timestamp, 'message digest calculation', exitcode, dfxml_cmd, dfxml_ver))
-    cPickle_dump('premis_list', premis_list)
+    pickleDump('premis_list', premis_list)
 
 def optical_drive_letter():
     drive_cmd = 'wmic logicaldisk get caption, drivetype | FINDSTR /C:"5"'
@@ -1412,7 +1431,7 @@ def optical_drive_letter():
 def disk_image_info(imagefile, reports_dir):
  
     print('\n\nDISK IMAGE METADATA EXTRACTION: FSSTAT and ILS')
-    premis_list = cPickle_load('premis_list') 
+    premis_list = pickleLoad('premis_list') 
     
     #check to see if fsstat was run; if not, do it
     fsstat_output = os.path.join(reports_dir, 'fsstat.txt')
@@ -1434,7 +1453,7 @@ def disk_image_info(imagefile, reports_dir):
     
     premis_list.append(premis_dict(timestamp, 'forensic feature analysis', exitcode, ils_command, ils_ver))
     
-    cPickle_dump('premis_list', premis_list)
+    pickleDump('premis_list', premis_list)
 
 def disktype_info(imagefile, reports_dir):
 
@@ -1446,9 +1465,9 @@ def disktype_info(imagefile, reports_dir):
         exitcode = subprocess.call(disktype_command, shell=True, text=True)
         
         #Save preservation event to PREMIS
-        premis_list = cPickle_load('premis_list')
+        premis_list = pickleLoad('premis_list')
         premis_list.append(premis_dict(timestamp, 'forensic feature analysis', exitcode, disktype_command, 'disktype v9'))
-        cPickle_dump('premis_list', premis_list)
+        pickleDump('premis_list', premis_list)
     
     #now get list of file systems on disk
     with open(disktype_output, 'r') as f:
@@ -1470,12 +1489,15 @@ def dir_tree(target):
     timestamp = str(datetime.datetime.now())
     exitcode = subprocess.call(tree_command, shell=True, text=True)
 
-    premis_list = cPickle_load('premis_list')
+    premis_list = pickleLoad('premis_list')
     premis_list.append(premis_dict(timestamp, 'metadata extraction', exitcode, tree_command, tree_ver))
-    cPickle_dump('premis_list', premis_list)
+    pickleDump('premis_list', premis_list)
 
 def format_analysis(files_dir, reports_dir, log_dir, metadata, html):
-
+    #return if Siegfried already run
+    if check_premis('format identification', 'eventType'):
+        return
+    
     siegfried_db = os.path.join(metadata, 'siegfried.sqlite')
     conn = sqlite3.connect(siegfried_db)
     conn.text_factory = str  # allows utf-8 data to be stored
@@ -1602,7 +1624,7 @@ def analyzeContent():
         write_pronom_links(temp_html, new_html)
 
     # get format list and add to appraisal dictionary
-    appraisal_dict = cPickle_load('appraisal_dict')
+    appraisal_dict = pickleLoad('appraisal_dict')
     
     fileformats = []
     formatcount = 0
@@ -1626,7 +1648,7 @@ def analyzeContent():
     except IOError:
         appraisal_dict['Formats'] = "ERROR! No formats.csv file to pull formats from."
             
-    cPickle_dump('appraisal_dict', appraisal_dict)
+    pickleDump('appraisal_dict', appraisal_dict)
     
     premis_name = str(barcode.get()) + '-premis.xml'
     premis_path = os.path.join(metadata, premis_name)
@@ -1689,7 +1711,7 @@ def writeNote():
     
     #need to account for situations where we need to write a note after conclusion of analysis--in these cases, we don't want to create a temp file again...
     if os.path.exists(os.path.join(home_dir, unit.get(), barcode.get(), 'temp')):
-        bc_dict = cPickle_load('bc_dict')
+        bc_dict = pickleLoad('bc_dict')
         bc_dict['label_transcript'] = label_transcription.get(1.0, END).replace('LABEL TRANSCRIPTION:\n\n', '')
     else:
         bc_dict = {}
@@ -1755,9 +1777,9 @@ def writeNote():
     print('\n\nInformation saved to Appraisal worksheet.') 
     
 def writeSpreadsheet():
-    premis_list = cPickle_load('premis_list')
+    premis_list = pickleLoad('premis_list')
             
-    bc_dict = cPickle_load('bc_dict')
+    bc_dict = pickleLoad('bc_dict')
     
     spreadsheet_copy = glob.glob(os.path.join(home_dir, unit.get(), '*.xlsx'))[0]
     
@@ -1788,9 +1810,9 @@ def writeSpreadsheet():
     
     #pull in other information about transfer: timestamp, method, outcome
     temp_dict = {}
-    if check_premis(premis_list, 'disk image creation', 'eventType'):
+    if check_premis('disk image creation', 'eventType'):
         writePremisToExcel(ws, newrow, 'disk image creation', premis_list)
-    elif check_premis(premis_list, 'replication', 'eventType'):
+    elif check_premis('replication', 'eventType'):
         writePremisToExcel(ws, newrow, 'replication', premis_list)
     else:
         pass
@@ -1799,7 +1821,7 @@ def writeSpreadsheet():
     ws.cell(row=newrow, column=15, value = noteField.get(1.0, END))
     
     #write appraisal information from various procedures
-    appraisal_dict = cPickle_load('appraisal_dict')
+    appraisal_dict = pickleLoad('appraisal_dict')
     
     ws.cell(row=newrow, column=16, value = appraisal_dict['Extent'])
     ws.cell(row=newrow, column=17, value = appraisal_dict['Files'])
@@ -1931,7 +1953,7 @@ def verify_barcode():
     wb = openpyxl.load_workbook(spreadsheet_copy)
 
     #Find the barcode in the inventory sheet; save information to a dictionary so that it can be written to the Appraisal sheet later.
-    bc_dict = cPickle_load('bc_dict')
+    bc_dict = pickleLoad('bc_dict')
     
     #if dictionary is empty, read info from spreadsheet; otherwise, retain dictionary
     if len(bc_dict) == 0:
@@ -1989,7 +2011,7 @@ def verify_barcode():
     appraisal_notes.insert(INSERT, "APPRAISAL NOTES:\n\n" + bc_dict['appraisal_notes'])
     appraisal_notes.configure(state='disabled')
     
-    cPickle_dump('bc_dict', bc_dict)
+    pickleDump('bc_dict', bc_dict)
             
     #Next, check if barcode has already been written to appraisal sheet
     ws1 = wb['Appraisal']
@@ -2006,9 +2028,10 @@ def verify_barcode():
             
             if os.path.exists(os.path.join(bdpl_vars()['metadata'], '%s-premis.xml' % barcode.get())):
                 print('\n\nNOTE: this item barcode has completed the entire ingest workflow.  Consult with the digital preservation librarian if you believe additional procedures are needed.')
+                shutil.rmtree(bdpl_vars()['temp_dir'])
                 return False
             else:
-                premis_list = cPickle_load('premis_list')
+                premis_list = pickleLoad('premis_list')
                 if len(premis_list) == 0:
                     print('\n\nItem barcode has been added to Appraisal worksheet, but no procedures have been completed.')
                 else:
@@ -2028,7 +2051,7 @@ def check_unfinished():
     for item_barcode in os.listdir(os.path.join(home_dir, unit.get())):
         if os.path.isdir(os.path.join(home_dir, unit.get(), item_barcode)):
             if os.path.exists(bdpl_vars()['temp_dir']):
-                premis_list = cPickle_load('premis_list')
+                premis_list = pickleLoad('premis_list')
                 if len(premis_list) == 0:
                     print('\nBarcode: %s' % item_barcode)
                     print('\tItem folder structure has been created, but no ingest procedures have been completed.')
@@ -2108,7 +2131,7 @@ def main():
     
     global window, source, jobType, unit, barcode, mediaStatus, source1, source2, source3, source4, disk525, jobType1, jobType2, jobType3, jobType4, sourceDevice, barcodeEntry, sourceEntry, unitEntry, spreadsheet, coll_creator, coll_title, xfer_source, appraisal_notes, bdpl_notes, noteSave, createBtn, analyzeBtn, transferBtn, noteField, label_transcription, bdpl_home, bdpl_resources, home_dir
     
-    home_dir = 'C:\\BDPL'
+    home_dir = 'Z:\\'
     bdpl_home = 'C:\\BDPL'
     bdpl_resources = os.path.join(bdpl_home, 'resources')
     
