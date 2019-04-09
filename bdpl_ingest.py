@@ -27,6 +27,7 @@ import tempfile
 import fnmatch
 from tkinter import *
 import tkinter.filedialog
+from tkinter import ttk
 import glob
 import pickle
 import time
@@ -65,12 +66,15 @@ def first_run():
     
     #now create folders
     createFolders()
+    
 
 def bdpl_vars():
     #this function creates folder variables
     vars = {}
     vars['unit_home'] = os.path.join(home_dir, '%s' % unit.get())
-    vars['destination'] = os.path.join(vars['unit_home'], "%s" % barcode.get())
+    vars['ship_dir'] = os.path.join(vars['unit_home'], '%s' % shipDateCombo.get())
+    vars['target'] = os.path.join(vars['ship_dir'], "%s" % barcode.get())
+    vars['destination'] = "X:\\"
     vars['image_dir'] = os.path.join(vars['destination'], "disk-image")
     vars['files_dir'] = os.path.join(vars['destination'], "files")
     vars['metadata'] = os.path.join(vars['destination'], "metadata")
@@ -88,11 +92,18 @@ def bdpl_vars():
 
 def createFolders():       
     #create folders
+    target = bdpl_vars()['target']
+    
     try:
-        os.makedirs(bdpl_vars()['destination'])
+        os.makedirs(target)
     except OSError as exception:
         if exception.errno != errno.EEXIST:
             raise
+    
+    #set up mapped folder
+    cmd = 'SUBST X: %s' % target
+    if not os.path.exists('X:\\'):
+        subprocess.check_output(cmd, shell=True)
 
     try:
         os.makedirs(bdpl_vars()['image_dir'])
@@ -149,7 +160,7 @@ def pickleLoad(list_name):
     return temp_list
 
 def pickleDump(list_name, list_contents):
-    temp_dir = bdpl_vars()['temp_dir']
+    temp_dir = os.path.join(bdpl_vars()['target'], 'temp')
     temp_file = os.path.join(temp_dir, '%s.txt' % list_name)
      
     if not os.path.exists(temp_dir):
@@ -1544,7 +1555,7 @@ def analyzeContent():
         return
         
     # copy .css and .jc files to assets directory
-    assets_dir = os.path.join(bdpl_resources, 'assets')
+    assets_dir = os.path.join(bdpl_home, 'resources', 'assets')
     assets_target = os.path.join(reports_dir, 'assets')
     if os.path.exists(assets_target):
         pass
@@ -1902,6 +1913,12 @@ def cleanUp():
     #clear Entry widgets--check if unit will be retained
     barcodeEntry.delete(0, END)
     sourceEntry.delete(0, END)
+    
+    #get rid of X: mapping
+    cmd = 'SUBST X: /D'
+    
+    if os.path.exists('X:\\'):
+        subprocess.check_output(cmd, shell=True)
            
 
 def closeUp():    
@@ -1910,6 +1927,11 @@ def closeUp():
         close_files_conns_on_exit(html, conn, cursor)
     except (NameError, sqlite3.ProgrammingError) as e:
         pass
+    
+    #get rid of X: mapping
+    cmd = 'SUBST X: /D'
+    if os.path.exists('X:\\'):
+        subprocess.check_output(cmd, shell=True)
     
     #make sure siegfried is up to date
     sfup = 'sf -update'
@@ -1934,15 +1956,20 @@ def verify_data():
     if unit.get() == '':
         '\n\nError; please make sure you have entered a 3-character unit abbreviation.'
         return False 
+    
+    if shipDateCombo.get() == '':
+        '\n\nError; please make sure you have entered a shipment ID.'
+        return False 
 
     return True
 
 def verify_barcode():
-    unit_home = bdpl_vars()['unit_home']
-    spreadsheet_copy = os.path.join(unit_home, os.path.basename(spreadsheet.get()))
+    ship_dir = bdpl_vars()['ship_dir']
+    
+    spreadsheet_copy = os.path.join(ship_dir, os.path.basename(spreadsheet.get()))
     if not os.path.exists(spreadsheet_copy):
         try:
-            os.makedirs(unit_home)
+            os.makedirs(ship_dir)
         except OSError as exception:
             if exception.errno != errno.EEXIST:
                 raise
@@ -2043,11 +2070,16 @@ def verify_barcode():
     return True
     
 def check_unfinished():
-
+    ship_dir = bdpl_vars()['ship_dir']
+    
     if unit.get() == '':
-        print('\n\nEnter a unit ID')
+        print('\n\nEnter a unit ID and try again.')
         return
     
+    if shipDateCombo.get() == '':
+        print('\n\nEnter a shipment ID and try again.')
+        return
+        
     for item_barcode in os.listdir(os.path.join(home_dir, unit.get())):
         if os.path.isdir(os.path.join(home_dir, unit.get(), item_barcode)):
             if os.path.exists(bdpl_vars()['temp_dir']):
@@ -2113,12 +2145,27 @@ def move_media_images():
         print('\n\nNo images of media at %s' % media_image_dir)
         return
     
+    #for each shipment, get a list of barcodes; associate each list with the parent shipment ID in a dictionary
+    shipDict = {}
+    
+    comboList = glob.glob1("%s" % (bdpl_vars()['unit_home']), '*')
+    #exclude any drop box folders
+    try:
+        comboList.remove('dropbox')
+    except ValueError:
+        pass
+    
+    #list of files with no parent
     bad_file_list = []
+    
+    #loop through a list of all images in this folder
     for f in os.listdir(media_image_dir):
-        if os.path.exists(os.path.join(unit_home, f.split('-')[0])):
-            if not os.path.exists(media_pics):
-                os.makedirs(media_pics)
-            shutil.move(os.path.join(media_image_dir, f), media_pics)
+        #for each picture, also loop through our 
+        for item in comboList:
+            if os.path.exists(os.path.join(unit_home, item, f.split('-')[0])):
+                if not os.path.exists(media_pics):
+                    os.makedirs(media_pics)
+                shutil.move(os.path.join(media_image_dir, f), media_pics)
         else:
             bad_file_list.append(f)
     if len(bad_file_list) > 0:
@@ -2127,13 +2174,27 @@ def move_media_images():
     else:
         print('\n\nMedia images successfully copied!')
 
+def updateCombobox():
+    
+    if unit.get() == '':
+        comboList = []
+    else:
+        comboList = glob.glob1("%s" % (bdpl_vars()['unit_home']), '*')
+        #exclude any drop box folders
+        try:
+            comboList.remove('dropbox')
+        except ValueError:
+            pass
+    
+    shipDateCombo['values'] = comboList
+
+
 def main():
     
-    global window, source, jobType, unit, barcode, mediaStatus, source1, source2, source3, source4, disk525, jobType1, jobType2, jobType3, jobType4, sourceDevice, barcodeEntry, sourceEntry, unitEntry, spreadsheet, coll_creator, coll_title, xfer_source, appraisal_notes, bdpl_notes, noteSave, createBtn, analyzeBtn, transferBtn, noteField, label_transcription, bdpl_home, bdpl_resources, home_dir
+    global window, source, jobType, unit, barcode, mediaStatus, source1, source2, source3, source4, disk525, jobType1, jobType2, jobType3, jobType4, sourceDevice, barcodeEntry, sourceEntry, unitEntry, spreadsheet, coll_creator, coll_title, xfer_source, appraisal_notes, bdpl_notes, noteSave, createBtn, analyzeBtn, transferBtn, noteField, label_transcription, bdpl_home, home_dir, shipDateCombo
     
-    home_dir = 'Z:\\'
+    home_dir = 'C:\\BDPL'
     bdpl_home = 'C:\\BDPL'
-    bdpl_resources = os.path.join(bdpl_home, 'resources')
     
     window = Tk()
     window.title("Indiana University Library Born-Digital Preservation Lab")
@@ -2181,6 +2242,14 @@ def main():
     unitEntry = Entry(topLeft2, width=5, textvariable=unit)
     unitEntry.pack(in_=topLeft2, side=LEFT, padx=5, pady=5)
 
+    shipLabel = Label(topLeft2, text="Shipment ID: ")
+    shipLabel.pack(in_=topLeft2, side=LEFT, padx=5, pady=5)
+    
+    #User can either select an existng shipment date or add new one
+    shipDateCombo = ttk.Combobox(topLeft2, width=20, postcommand = updateCombobox)
+    shipDateCombo.pack(in_=topLeft2, side=LEFT, padx=5, pady=5)
+    
+
     '''
     
     GUI section for job info
@@ -2200,7 +2269,7 @@ def main():
     
     #job types: these determine which operations run on content
     jobTypeLabel = Label(upperMiddle, text="Job type:")
-    jobTypeLabel.grid(column=0, row=1, padx=10, pady=5)
+    jobTypeLabel.grid(column=0, row=1, padx=5, pady=5)
 
     jobType = StringVar()
     jobType.set(None)
