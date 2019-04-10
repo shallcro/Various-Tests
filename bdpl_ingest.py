@@ -71,7 +71,7 @@ def first_run():
 def bdpl_vars():
     #this function creates folder variables
     vars = {}
-    vars['unit_home'] = os.path.join(home_dir, '%s' % unit.get())
+    vars['unit_home'] = os.path.join(home_dir, unit.get(), 'ingest' )
     vars['ship_dir'] = os.path.join(vars['unit_home'], '%s' % shipDateCombo.get())
     vars['target'] = os.path.join(vars['ship_dir'], "%s" % barcode.get())
     vars['destination'] = "X:\\"
@@ -487,7 +487,8 @@ def TransferContent():
                         
             #convert TOC to CUE
             cue = os.path.join(image_dir, "%s-%s.cue") % (barcode.get(), str(sessions).zfill(2))
-            t2c_cmd = 'toc2cue %s %s' % (cdr_toc, cue)
+            cue_log = os.path.join(log_dir, "%s-%s_toc2cue.log") % (barcode.get(), str(sessions).zfill(2))
+            t2c_cmd = 'toc2cue %s %s > %s 2>&1' % (cdr_toc, cue, cue_log)
             timestamp = str(datetime.datetime.now())
             exitcode2 = subprocess.call(t2c_cmd, shell=True, text=True)
             
@@ -2150,10 +2151,6 @@ def move_media_images():
     
     comboList = glob.glob1("%s" % (bdpl_vars()['unit_home']), '*')
     #exclude any drop box folders
-    try:
-        comboList.remove('dropbox')
-    except ValueError:
-        pass
     
     #list of files with no parent
     bad_file_list = []
@@ -2180,11 +2177,6 @@ def updateCombobox():
         comboList = []
     else:
         comboList = glob.glob1("%s" % (bdpl_vars()['unit_home']), '*')
-        #exclude any drop box folders
-        try:
-            comboList.remove('dropbox')
-        except ValueError:
-            pass
     
     shipDateCombo['values'] = comboList
 
