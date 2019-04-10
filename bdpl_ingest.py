@@ -276,11 +276,13 @@ def TransferContent():
     files_dir = bdpl_vars()['files_dir']
     image_dir = bdpl_vars()['image_dir']
     
+    newscreen()
+    
     #check that barcode exists on spreadsheet; exit if not wrong
     if not verify_data():
         return
     
-    newscreen()
+    
     
     print('\n\nSTEP 1. TRANSFER CONTENT')
         
@@ -334,7 +336,8 @@ def TransferContent():
             
             ddrescue_image(temp_dir, log_dir, imagefile, image_dir)
         
-        #now extract/copy files; first, run disktype to determine file systems on image; then check
+        #now get info on the disk image to determine best way to extract/replicate files
+        
         fs_list = disktype_info(imagefile, reports_dir)
         
         if any('HFS' in item for item in fs_list):
@@ -552,6 +555,8 @@ def check_fs(fs_type, disktype_output):
         return False
 
 def carvefiles(carve_ver, carve_cmd, tool, location1, location2):
+    #check partition table
+    
     if tool == 'UNHFS':
         print('\n\nFILE REPLICATION: %s\n\tSOURCE: %s \n\tDESTINATION: %s' % (tool, location2, location1))
     else:
@@ -1441,29 +1446,52 @@ def optical_drive_letter():
     return drive_ltr
 
 def disk_image_info(imagefile, reports_dir):
- 
-    print('\n\nDISK IMAGE METADATA EXTRACTION: FSSTAT and ILS')
+    
     premis_list = pickleLoad('premis_list') 
     
-    #check to see if fsstat was run; if not, do it
+    print('\n\nDISK IMAGE METADATA EXTRACTION: DISKTYPE, FSSTAT, ILS, MMLS')
+    
+    #run disktype and print output
+    disktype_output = os.path.join(reports_dir, 'disktype.txt')
+    disktype_command = 'disktype %s > %s' % (imagefile, disktype_output)
+    
+    timestamp = str(datetime.datetime.now())
+    exitcode = subprocess.call(disktype_command, shell=True, text=True)
+    premis_list.append(premis_dict(timestamp, 'forensic feature analysis', exitcode, disktype_command, 'disktype v9'))
+        
+    #print out disktype info
+    with open(disktype_output, 'r') as f:
+        print(f.read(), end="")
+    
+    #run fsstat: get range of meta-data values (inode numbers) and content units (blocks or clusters)
     fsstat_output = os.path.join(reports_dir, 'fsstat.txt')
     fsstat_ver = 'fsstat: %s' % subprocess.check_output('fsstat -V', shell=True, text=True).strip()
-    fsstat_command = 'fsstat %s > %s' % (imagefile, fsstat_output)
+    fsstat_command = 'fsstat %s > %s 2>&1' % (imagefile, fsstat_output)
     
     timestamp = str(datetime.datetime.now())
     exitcode = subprocess.call(fsstat_command, shell=True, text=True)
     
     premis_list.append(premis_dict(timestamp, 'forensic feature analysis', exitcode, fsstat_command, fsstat_ver))
 
-    #check to see if ils has been run; if not, do it! 
+    #run ils to document inode information
     ils_output = os.path.join(reports_dir, 'ils.txt')
-    ils_ver = subprocess.check_output('ils -V', shell=True, text=True).strip()
-    ils_command = 'ils -e %s > %s' % (imagefile, ils_output)
+    ils_ver = 'ils: %s' % subprocess.check_output('ils -V', shell=True, text=True).strip()
+    ils_command = 'ils -e %s > %s 2>&1' % (imagefile, ils_output)
     
     timestamp = str(datetime.datetime.now())
     exitcode = subprocess.call(ils_command, shell=True, text=True) 
     
     premis_list.append(premis_dict(timestamp, 'forensic feature analysis', exitcode, ils_command, ils_ver))
+    
+    #run mmls to document the layout of partitions in a volume system
+    mmls_output = os.path.join(reports_dir, 'mmls.txt')
+    mmls_ver = 'mmls: %s' % subprocess.check_output('mmls -V', shell=True, text=True).strip()
+    mmls_command = 'mmls %s > %s 2>&1' % (imagefile, mmls_output)
+    
+    timestamp = str(datetime.datetime.now())
+    exitcode = subprocess.call(mmls_command, shell=True, text=True) 
+    
+    premis_list.append(premis_dict(timestamp, 'forensic feature analysis', exitcode, mmls_command, mmls_ver))
     
     pickleDump('premis_list', premis_list)
 
@@ -1543,7 +1571,9 @@ def analyzeContent():
     temp_dir = bdpl_vars()['temp_dir']
     image_dir = bdpl_vars()['image_dir']
     dfxml_output = bdpl_vars()['dfxml_output']
-
+    
+    newscreen()
+    
     print('\n\n-------------------------------------------------------------\n\nSTEP 2: CONTENT ANALYSIS') 
     
     #if information not 'verified' then go into 'first run'; exit if anything is wrong
@@ -1584,10 +1614,13 @@ def analyzeContent():
         
         #fix dates from files replicated by tsk_recover; avoid HFS, UDF, and ISO9660 images
         fs_list = disktype_info(imagefile, reports_dir)
-        for fs in ['UDF', 'ISO9660', 'HFS']:
-            if any(fs in item for item in fs_list):
-                fix_dates(files_dir, dfxml_output)
-                break
+        # avoid_list = ['UDF', 'ISO9660', 'HFS']
+        # if [i for i in avoid_list any(fs in item for item in fs_list):
+                # break
+            # fix_dates(files_dir, dfxml_output)
+            
+            ###THIS SECTION IS ALLLL SCREWED UP!***
+                
     
         #document directory structure
         dir_tree(files_dir)
@@ -2183,7 +2216,7 @@ def updateCombobox():
 
 def main():
     
-    global window, source, jobType, unit, barcode, mediaStatus, source1, source2, source3, source4, disk525, jobType1, jobType2, jobType3, jobType4, sourceDevice, barcodeEntry, sourceEntry, unitEntry, spreadsheet, coll_creator, coll_title, xfer_source, appraisal_notes, bdpl_notes, noteSave, createBtn, analyzeBtn, transferBtn, noteField, label_transcription, bdpl_home, home_dir, shipDateCombo
+    global window, source, jobType, unit, barcode, mediaStatus, source1, source2, source3, source4, disk525, jobType1, jobType2, jobType3, jobType4, sourceDevice, barcodeEntry, sourceEntry, unitEntry, spreadsheet, coll_creator, coll_title, xfer_source, appraisal_notes, bdpl_notes, noteField, label_transcription, bdpl_home, home_dir, shipDateCombo
     
     home_dir = 'C:\\BDPL'
     bdpl_home = 'C:\\BDPL'
