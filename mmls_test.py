@@ -22,7 +22,7 @@ def fix_dates(files_dir, dfxml_output):
     try:
         for (event, obj) in Objects.iterparse(dfxml_output):
             # only work on FileObjects
-            if not isinstance(obj, Objects.FileObject): -
+            if not isinstance(obj, Objects.FileObject):
                 continue
 
             # skip directories and links
@@ -99,7 +99,7 @@ def unhfs_func(start, out, imagefile):
     if start == '':
         cmd = 'unhfs -o "C:\\temp\\mmls\\unhfs" {}'.format(imagefile)
     else:
-        cmd = 'unhfs -partition {} -o {} {}'.format(start, out, imagefile)
+        cmd = 'unhfs -v -partition {} -o {} {}'.format(start, out, imagefile)
     
     subprocess.call(cmd, shell=True)
 

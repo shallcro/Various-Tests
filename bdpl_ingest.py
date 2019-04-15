@@ -275,14 +275,13 @@ def TransferContent():
     reports_dir = bdpl_vars()['reports_dir']
     files_dir = bdpl_vars()['files_dir']
     image_dir = bdpl_vars()['image_dir']
+    dfxml_output = bdpl_vars()['dfxml_output']
     
     newscreen()
     
     #check that barcode exists on spreadsheet; exit if not wrong
     if not verify_data():
         return
-    
-    
     
     print('\n\nSTEP 1. TRANSFER CONTENT')
         
@@ -336,27 +335,79 @@ def TransferContent():
             
             ddrescue_image(temp_dir, log_dir, imagefile, image_dir)
         
-        #now get info on the disk image to determine best way to extract/replicate files
+        #now attempt to replicate/extract content from disk image
+        print('\n\nFILE REPLICATION: ')
         
-        fs_list = disktype_info(imagefile, reports_dir)
+        #get info on the disk image (fsstat, ils, mmls, and disktype) and generate DFXML
+        disk_image_info(imagefile, reports_dir)
+        produce_dfxml(imagefile)
+
+        #now parse output to get information on filesystems and (if present) partitions
+        disktype_output = os.path.join(reports_dir, 'disktype.txt')
+        mmls_output = os.path.join(reports_dir, 'mmls.txt')
         
-        if any('HFS' in item for item in fs_list):
-            carve_ver = subprocess.check_output('unhfs', shell=True, text=True).split('\n', 1)[0]
-            carve_cmd = 'unhfs -v -resforks APPLEDOUBLE -o "%s" "%s"' % (files_dir, imagefile)
+        #next, we need to see if there are any partitions on the image
+        if os.stat(mmls_output).st_size == 0:
+            print('\n\nNo partitions recognized by mmls.')
             
-            carvefiles(carve_ver, carve_cmd, 'UNHFS', imagefile, files_dir)
+            #see what kind of filesystems are present
+            fs_list = []
+             with open(disktype_output, 'r') as f:
+                for line in f:
+                    if 'file system' in line:
+                        fs_list.append(line.lstrip().split(' file system', 1)[0])
+            
+            #if any file systems have been found, copy or extract to /files/ directory
+            if len(fs_list) > 0:
                 
-        elif any('ISO9660' in item for item in fs_list):
-            secureCopy(optical_drive_letter(), files_dir)
+                print('\n\nDisktype has identified the following file systems: ', ', '.join(fs_list)
                 
-        elif any('UDF' in item for item in fs_list):
-            secureCopy(optical_drive_letter(), files_dir)
-                
+                #If UDF or ISO9660 present, use TeraCopy; otherwise use unhfs or tsk_recover
+                check_list = ['UDF', 'ISO9660']
+                if any(fs in ' '.join(fs_list) for fs in check_list):
+                    secureCopy(optical_drive_letter(), files_dir)
+
+                elif 'HFS' in ' '.join(fs_list):
+                    carvefiles('unhfs', imagefile, files_dir, '')
+                    
+                else:
+                    carvefiles('tsk_recover', imagefile, files_dir, '')
+                    
+            else:
+                print('\n\nDisktype unable to identify image file system(s)')
+        
+        #if we *do* have an mmls report, then pull our key data points out: slot, start, and description.  Create a dictionary for each partition and then save these to a list
         else:
-            carve_ver = 'tsk_recover: %s ' % subprocess.check_output('tsk_recover -V').strip()
-            carve_cmd = 'tsk_recover -a "%s" "%s"' % (imagefile, files_dir)
+            partition_info = []
+            part_no = 0
+            with open(mmls_output, 'r') as f:
+                print('\n\nmmls identified one or more partitions')
+                
+                #skip the first 4 mmls header lines
+                for line in f.readlines()[5:]:
+                    temp = {}
+                    #only read those lines that have numerical 'slot' info
+                    if any(s.isdigit() for s in re.split(r'\s\s+', line.rstrip())[1]):
+                        temp['part_id'] = str(part_no)
+                        temp['start'] = re.split(r'\s\s+', line.rstrip())[2]
+                        temp['desc'] = re.split(r'\s\s+', line.rstrip())[5]
+                        part_no += 1
+                        #now save this dictionary to our list of partition info
+                        partition_info.append(temp)
             
-            carvefiles(carve_ver, carve_cmd, 'TSK_RECOVER', imagefile, files_dir)
+            #go through the list to identify which need to be handled by unhfs and which by tsk_recover
+            #list of potential descriptions to ID when unhfs is required
+            unhfs_list = ['osx', 'hfs', 'Apple']
+            
+            for part_dict in partition_info:
+                
+                if any(fs in part['desc'] for fs in unhfs_list):
+                    carvefiles('unhfs', imagefile, files_dir, part_dict)
+                                  
+                else:
+                    carvefiles('tsk_recover', imagefile, files_dir, part_dict)
+        
+        print('\n\nFILE REPLICATION COMPLETE; PROCEED TO NEXT STEP')
             
     elif jobType.get() == 'DVD':
         #make sure media is present
@@ -554,28 +605,68 @@ def check_fs(fs_type, disktype_output):
                 continue
         return False
 
-def carvefiles(carve_ver, carve_cmd, tool, location1, location2):
-    #check partition table
-    
-    if tool == 'UNHFS':
-        print('\n\nFILE REPLICATION: %s\n\tSOURCE: %s \n\tDESTINATION: %s' % (tool, location2, location1))
+def tsk_recover_func(start, out, imagefile):
+    if start == '':
+        cmd = 'tsk_recover -a {} "C:\\temp\\mmls\\tsk'.format(imagefile) 
     else:
-        print('\n\nFILE REPLICATION: %s\n\tSOURCE: %s \n\tDESTINATION: %s' % (tool, location1, location2))
-    #carve files from disk images (excluding ISO9660 and UDF)
-    timestamp = str(datetime.datetime.now())  
-    pipes = subprocess.Popen(carve_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True, text=True)
-    std_out, std_err = pipes.communicate()
+        cmd = 'tsk_recover -a -o {} {} {}'.format(start, imagefile, out)
+
+    subprocess.call(cmd, shell=True)
+
+def unhfs_func(start, out, imagefile):
+    if start == '':
+        cmd = 'unhfs -o "C:\\temp\\mmls\\unhfs" {}'.format(imagefile)
+    else:
+        cmd = 'unhfs -partition {} -o {} {}'.format(start, out, imagefile)
+    
+    subprocess.call(cmd, shell=True)
+
+def carvefiles(tool, imagefile, files_dir, part_dict):
+    #set commands based on tool type and if there are partitions (will include partition dictionary if so)
+    
+    
+    if tool == 'unhfs':
+        unhfs_ver = os.path.join(bdpl_vars()['temp_dir'], 'unhfs.txt')
+        if not os.path.exists(unhfs_ver):
+            cmd = 'unhfs > %s 2>&1' % unhfs_ver
+            subprocess.check_output(cmd, shell=True)
         
-    if pipes.returncode == 0 or pipes.returncode == '0':
-        print('\n\nFILE REPLICATION COMPLETED; PROCEED TO NEXT STEP.')
-    else:
-        print('\n\nFILE REPLICATION FAILED:\n\t%s' % std_err)
-        return
+        with open(unhfs_ver, 'r') as f:
+            carve_ver = f.read().splitlines()[0]
+        
+        if part_dict == '':
+            carve_cmd = 'unhfs -resforks APPLEDOUBLE -o "%s" "%s"' % (files_dir, imagefile)
+        else:
+            outfolder = os.path.join(files_dir, 'partition_%s' % part_dict['part_id'].zfill(2))
+            
+            carve_cmd = 'unhfs -partition %s -resforks APPLEDOUBLE -o "%s" "%s"' % (part_dict[part['part_id'], outfolder, imagefile)
     
-    #save preservation event to PREMIS
+    else:
+        carve_ver = 'tsk_recover: %s ' % subprocess.check_output('tsk_recover -V').strip()
+        
+        if part_dict == '':
+            carve_cmd = 'tsk_recover -a %s %s' % (imagefile, files_dir)
+        
+        else:
+            part_no = str(int(part_dict['part_id']) + 1).zfill(2)
+            outfolder = os.path.join(files_dir, 'partition_%s' % part_no)
+            
+            carve_cmd = 'tsk_recover -a -o %s %s %s' % (part_dict['start'], imagefile, outfolder)
+        
+    print('\n\n\tTOOL: %s\n\tSOURCE: %s \n\tDESTINATION: %s' % (tool, files_dir, imagefile))
+    
+    if not os.path.exists(outfolder):
+        os.makedirs(outfolder)
+    
+    timestamp = str(datetime.datetime.now())  
+    exitcode = subprocess.call(carve_cmd, shell=True)
+    
     premis_list = pickleLoad('premis_list')
-    premis_list.append(premis_dict(timestamp, 'replication', pipes.returncode, carve_cmd, carve_ver))
+    premis_list.append(premis_dict(timestamp, 'replication', exitcode, carve_cmd, carve_ver))
     pickleDump('premis_list', premis_list)
+    
+    if tool = 'tsk_recover':
+        fix_dates(outfolder)
     
 def time_to_int(str_time):
     """ Convert datetime to unix integer value """
@@ -583,12 +674,21 @@ def time_to_int(str_time):
         "%Y-%m-%dT%H:%M:%S").timetuple())
     return dt
     
-def fix_dates(files_dir, dfxml_output):
+def fix_dates(files_dir):
     #adapted from Timothy Walsh's Disk Image Processor: https://github.com/CCA-Public/diskimageprocessor
-    timestamp = str(datetime.datetime.now())
     
     print('\n\nFILE MAC TIME CORRECTION (USING DFXML)')
+   
+    dfxml_output = bdpl_vars()['dfxml_output']
     
+    #return if fiwalk was unable to read file system
+    with open(dfxml_output, 'r') as f:
+        if "TSK_Error 'Cannot determine file system type'" in f.read():
+            print('\n\nFiwalk was unable to read disk image file system.')
+            return
+    
+    timestamp = str(datetime.datetime.now())
+     
     try:
         for (event, obj) in Objects.iterparse(dfxml_output):
             # only work on FileObjects
@@ -1451,8 +1551,16 @@ def disk_image_info(imagefile, reports_dir):
     
     print('\n\nDISK IMAGE METADATA EXTRACTION: FSSTAT, ILS, MMLS')
     
-    #print out disktype info
+    #run disktype to get information on file systems on disk
     disktype_output = os.path.join(reports_dir, 'disktype.txt')
+    disktype_command = 'disktype %s > %s' % (imagefile, disktype_output)
+        
+    timestamp = str(datetime.datetime.now())
+    exitcode = subprocess.call(disktype_command, shell=True, text=True)
+
+    premis_list.append(premis_dict(timestamp, 'forensic feature analysis', exitcode, disktype_command, 'disktype v9'))
+    
+    #print out disktype info
     with open(disktype_output, 'r') as f:
         print(f.read(), end="")
     
@@ -1479,7 +1587,7 @@ def disk_image_info(imagefile, reports_dir):
     #run mmls to document the layout of partitions in a volume system
     mmls_output = os.path.join(reports_dir, 'mmls.txt')
     mmls_ver = 'mmls: %s' % subprocess.check_output('mmls -V', shell=True, text=True).strip()
-    mmls_command = 'mmls %s > %s 2>&1' % (imagefile, mmls_output)
+    mmls_command = 'mmls %s > %s 2>NUL' % (imagefile, mmls_output)
     
     timestamp = str(datetime.datetime.now())
     exitcode = subprocess.call(mmls_command, shell=True, text=True) 
@@ -1487,27 +1595,6 @@ def disk_image_info(imagefile, reports_dir):
     premis_list.append(premis_dict(timestamp, 'forensic feature analysis', exitcode, mmls_command, mmls_ver))
     
     pickleDump('premis_list', premis_list)
-
-def disktype_info(imagefile, reports_dir):
-
-    disktype_output = os.path.join(reports_dir, 'disktype.txt')
-    if not os.path.exists(disktype_output):
-        disktype_command = 'disktype %s > %s' % (imagefile, disktype_output)
-        
-        timestamp = str(datetime.datetime.now())
-        exitcode = subprocess.call(disktype_command, shell=True, text=True)
-        
-        #Save preservation event to PREMIS
-        premis_list = pickleLoad('premis_list')
-        premis_list.append(premis_dict(timestamp, 'forensic feature analysis', exitcode, disktype_command, 'disktype v9'))
-        pickleDump('premis_list', premis_list)
-    
-    #now get list of file systems on disk
-    with open(disktype_output, 'r') as f:
-        for line in f:
-            if 'file system' in line:
-                    fs_list.append(line.lstrip().split(' file system', 1)[0])
-    return fs_list
 
 def dir_tree(target):
     
@@ -1600,22 +1687,6 @@ def analyzeContent():
     #special steps if working on disk image...
     if jobType.get() == 'Disk_image':
                 
-        #get additional info about the disk image
-        disk_image_info(imagefile, reports_dir)
-        
-        #generate DFXML with checksums
-        produce_dfxml(imagefile)
-        
-        #fix dates from files replicated by tsk_recover
-        disktype_output = os.path.join(reports_dir, 'disktype.txt')
-        
-        #first, get a list of all filesystems on disk
-        fs_list = disktype_info(imagefile, reports_dir)
-        
-        #now see if our list of file systems include either HFS, UDF, or ISO9660 images; these files were replicated using tools other than tsk_recover and don't require date fixes.
-        check_list = ['UDF', 'ISO9660', 'HFS']
-        if not any(fs in ' '.join(fs_list) for fs in check_list):
-            fix_dates(files_dir, dfxml_output)
     
         #document directory structure
         dir_tree(files_dir)
@@ -1646,11 +1717,7 @@ def analyzeContent():
         produce_dfxml(image_dir)
         
         #document directory structure
-        dir_tree(files_dir)
-    
-    else: 
-        print('\n\nError; please indicate the appropriate job type')
-        return   
+        dir_tree(files_dir) 
     
     #run siegfried to characterize file formats  
     format_analysis(files_dir, reports_dir, log_dir, metadata, html)
