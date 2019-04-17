@@ -205,7 +205,7 @@ def secureCopy(file_source, file_destination):
     
     #capture premis
     premis_list = pickleLoad('premis_list')
-    premis_list.append(premis_dict(timestamp, 'replication', exitcode, copycmd, migrate_ver))
+    premis_list.append(premis_dict(timestamp, 'replication', exitcode, copycmd, 'Created a copy of an object that is, bit-wise, identical to the original.', migrate_ver))
     pickleDump('premis_list', premis_list)
     
     print('\n\nFILE REPLICATION COMPLETED; PROCEED TO NEXT STEP.')
@@ -238,7 +238,7 @@ def ddrescue_image(temp_dir, log_dir, imagefile, image_dir):
 
     exitcode1 = subprocess.call(copycmd1, shell=True, text=True)
     
-    premis_list.append(premis_dict(timestamp1, 'disk image creation', exitcode1, copycmd1, migrate_ver))
+    premis_list.append(premis_dict(timestamp1, 'disk image creation', exitcode1, copycmd1, 'First pass; extracted a disk image from the physical information carrier.', migrate_ver))
     
     #new timestamp for second pass (recommended by ddrescue developers)
     timestamp2 = str(datetime.datetime.now())
@@ -251,7 +251,7 @@ def ddrescue_image(temp_dir, log_dir, imagefile, image_dir):
         if os.stat(imagefile).st_size > 0:
             print('\n\nDISK IMAGE CREATED.')
             exitcode2 = 0
-            premis_list.append(premis_dict(timestamp2, 'disk image creation', exitcode2, copycmd2, migrate_ver))
+            premis_list.append(premis_dict(timestamp2, 'disk image creation', exitcode2, copycmd2, 'Second pass; extracted a disk image from the physical information carrier.', migrate_ver))
         else:
             print('\n\nDISK IMAGE CREATION FAILED\n\n\tIndicate any issues in note to collecting unit.')
     else:
@@ -316,13 +316,13 @@ def TransferContent():
             exitcode = subprocess.call(copycmd, shell=True, text=True)
             
             if exitcode == 0:
-                premis_list.append(premis_dict(timestamp, 'disk image creation', exitcode, copycmd, 'FCIMAGE v1309'))
+                premis_list.append(premis_dict(timestamp, 'disk image creation', exitcode, copycmd, 'Extracted a disk image from the physical information carrier.', 'FCIMAGE v1309'))
                 
             
             else:
                 #FC5025 reports non-0 exitcode if there are any read errors; therefore, if a disk image larger than 0 bytes exists, we will call it a success
                 if os.stat(imagefile).st_size > 0:
-                    premis_list.append(premis_dict(timestamp, 'disk image creation', 0, copycmd, 'FCIMAGE v1309'))
+                    premis_list.append(premis_dict(timestamp, 'disk image creation', 0, copycmd, 'Extracted a disk image from the physical information carrier.', 'FCIMAGE v1309'))
                 else:
                     print('\n\nDisk image not successfully created; verify you have selected the correct disk type and try again (if possible).  Otherwise, indicate issues in note to collecting unit.')
                     return
@@ -442,7 +442,7 @@ def TransferContent():
         lsdvdcmd = 'lsdvd -Ox -x %s > %s 2> NUL' % (ffmpeg_source, lsdvdout)
         exitcode = subprocess.call(lsdvdcmd, shell=True, text=True)
         
-        premis_list.append(premis_dict(timestamp, 'metadata extraction', exitcode, lsdvdcmd, lsdvd_ver))
+        premis_list.append(premis_dict(timestamp, 'metadata extraction', exitcode, lsdvdcmd, 'Extracted content information from DVD, including titles, chapters, audio streams and video.', lsdvd_ver))
         
         #check file to see how many titles are on DVD using lsdvd XML output
         parser = ET.XMLParser(recover=True)
@@ -476,7 +476,7 @@ def TransferContent():
                 
                 exitcode = subprocess.call(ffmpeg_cmd, shell=True, text=True)
                     
-                premis_list.append(premis_dict(timestamp, 'normalization: access version', exitcode, ffmpeg_cmd, ffmpeg_ver))
+                premis_list.append(premis_dict(timestamp, 'normalization', exitcode, ffmpeg_cmd, 'Transformed object to an institutionally supported preservation format (.MPG) with a direct copy of all streams.', ffmpeg_ver))
                 
                 #move and rename ffmpeg log file
                 ffmpeglog = glob.glob(os.path.join(ffmpeg_temp, 'ffmpeg-*.log'))[0]
@@ -517,7 +517,7 @@ def TransferContent():
         timestamp = str(datetime.datetime.now())
         exitcode = subprocess.call(cdrdao_cmd, shell=True, text=True)
         
-        premis_list.append(premis_dict(timestamp, 'metadata extraction', exitcode, cdrdao_cmd, cdrdao_ver))
+        premis_list.append(premis_dict(timestamp, 'metadata extraction', exitcode, cdrdao_cmd, 'Extracted information about the CD-R, including medium, TOC type, number of sessions, etc.', cdrdao_ver))
 
         #read log file to determine # of sessions on disk.
         with open(disk_info_log, 'r') as f:
@@ -541,7 +541,7 @@ def TransferContent():
             
             exitcode = subprocess.call(cdr_cmd, shell=True, text=True)
             
-            premis_list.append(premis_dict(timestamp, 'disk image creation', exitcode, cdr_cmd, cdrdao_ver))
+            premis_list.append(premis_dict(timestamp, 'disk image creation', exitcode, cdr_cmd, 'Extracted a disk image from the physical information carrier.', cdrdao_ver))
                         
             #convert TOC to CUE
             cue = os.path.join(image_dir, "%s-%s.cue") % (barcode.get(), str(sessions).zfill(2))
@@ -550,7 +550,7 @@ def TransferContent():
             timestamp = str(datetime.datetime.now())
             exitcode2 = subprocess.call(t2c_cmd, shell=True, text=True)
             
-            premis_list.append(premis_dict(timestamp, 'metadata modification', exitcode2, t2c_cmd, t2c_ver))
+            premis_list.append(premis_dict(timestamp, 'metadata modification', exitcode2, t2c_cmd, "Converted the CD's table of contents (TOC) file to the CUE format.", t2c_ver))
             
             #place a copy of the .cue file for the first session in files_dir for the forthcoming WAV; this session will have audio data
             if x == 1:
@@ -578,7 +578,7 @@ def TransferContent():
         timestamp = str(datetime.datetime.now())
         exitcode = subprocess.call(paranoia_cmd, shell=True, text=True)
         
-        premis_list.append(premis_dict(timestamp, 'disk image creation', exitcode, paranoia_cmd, paranoia_ver))
+        premis_list.append(premis_dict(timestamp, 'normalization', exitcode, paranoia_cmd, 'Transformed object to an institutionally supported preservation format (.WAV).', paranoia_ver))
         
         #save PREMIS to file
         pickleDump('premis_list', premis_list)
@@ -670,7 +670,7 @@ def carvefiles(tool, imagefile, files_dir, part_dict):
     exitcode = subprocess.call(carve_cmd, shell=True)
     
     premis_list = pickleLoad('premis_list')
-    premis_list.append(premis_dict(timestamp, 'replication', exitcode, carve_cmd, carve_ver))
+    premis_list.append(premis_dict(timestamp, 'replication', exitcode, carve_cmd, "Created a copy of an object that is, bit-wise, identical to the original.", carve_ver))
     pickleDump('premis_list', premis_list)
     
     #if tsk_recover has been run, go through and fix the file MAC times
@@ -755,7 +755,7 @@ def fix_dates(files_dir):
     
     premis_list = pickleLoad('premis_list')
         
-    premis_list.append(premis_dict(timestamp, 'metadata modification (timestamp correction)', '0', 'https://github.com/CCA-Public/diskimageprocessor/blob/master/diskimageprocessor.py#L446-L489', 'Adapted from Disk Image Processor Version: 1.0.0 (Tim Walsh)'))
+    premis_list.append(premis_dict(timestamp, 'metadata modification', '0', 'https://github.com/CCA-Public/diskimageprocessor/blob/master/diskimageprocessor.py#L446-L489', 'Corrected file timestamps to match information extracted from disk image.', 'Adapted from Disk Image Processor Version: 1.0.0 (Tim Walsh)'))
 
     pickleDump('premis_list', premis_list)
 
@@ -813,7 +813,7 @@ def run_antivirus(files_dir, log_dir, metadata):
     
     #save preservation to PREMIS
     premis_list = pickleLoad('premis_list')
-    premis_list.append(premis_dict(timestamp, 'virus check', exitcode, av_command, av_ver))
+    premis_list.append(premis_dict(timestamp, 'virus check', exitcode, av_command, 'Scanned files for malicious programs.', av_ver))
     pickleDump('premis_list', premis_list)
    
 
@@ -821,7 +821,7 @@ def run_bulkext(bulkext_dir, bulkext_log, files_dir, html, reports_dir):
     print('\n\nSENSITIVE DATA SCAN: BULK_EXTRACTOR')
     
     #return if b_e was run before
-    if check_premis('PII scan', 'eventType'):
+    if check_premis('Sensitive data scan', 'eventType'):
         print('\n\nSensitive data scan already completed.')
         return
     
@@ -841,12 +841,12 @@ def run_bulkext(bulkext_dir, bulkext_log, files_dir, html, reports_dir):
     
     #get bulk extractor version for premis
     try:
-        be_ver = subprocess.check_output(['bulk_extractor', '-V'], shell=True, text=True)
+        be_ver = subprocess.check_output(['bulk_extractor', '-V'], shell=True, text=True).rstrip()
     except subprocess.CalledProcessError as e:
         be_ver = e.output
        
     premis_list = pickleLoad('premis_list')       
-    premis_list.append(premis_dict(timestamp, 'PII scan', exitcode, bulkext_command, be_ver.rstrip()))
+    premis_list.append(premis_dict(timestamp, 'Sensitive data scan', exitcode, bulkext_command, 'Scanned files for potentially sensitive information, including Social Security and credit card numbers.', be_ver))
     pickleDump('premis_list', premis_list)
     
     #create a cumulative BE report
@@ -889,7 +889,7 @@ def run_siegfried(files_dir, reports_dir, siegfried_version):
     
     premis_list = pickleLoad('premis_list')
     
-    premis_list.append(premis_dict(timestamp, 'format identification', exitcode, sf_command, siegfried_version))
+    premis_list.append(premis_dict(timestamp, 'format identification', exitcode, sf_command, 'Determined file format and version numbers for content recorded in the PRONOM format registry.', siegfried_version))
     
     pickleDump('premis_list', premis_list)
 
@@ -1466,7 +1466,7 @@ def print_premis(premis_path):
         eventDetail = ET.SubElement(eventDetailInfo, PREMIS + 'eventDetail')
         eventDetail.text = entry['eventDetailInfo']
         
-        #additional eventDetailInfo to clarify action
+        #include additional eventDetailInfo to clarify action
         eventDetailInfo = ET.SubElement(event, PREMIS + 'eventDetailInformation')
         eventDetail = ET.SubElement(eventDetailInfo, PREMIS + 'eventDetail')
         eventDetail.text = entry['eventDetailInfo_additional']
@@ -1556,7 +1556,7 @@ def produce_dfxml(target):
     
     #save PREMIS
     premis_list = pickleLoad('premis_list')        
-    premis_list.append(premis_dict(timestamp, 'message digest calculation', exitcode, dfxml_cmd, dfxml_ver))
+    premis_list.append(premis_dict(timestamp, 'message digest calculation', exitcode, dfxml_cmd, 'Extracted information about the strucutre and characteristics of content, including file checksums.', dfxml_ver))
     pickleDump('premis_list', premis_list)
 
 def optical_drive_letter():
@@ -1577,7 +1577,7 @@ def disk_image_info(imagefile, reports_dir):
     timestamp = str(datetime.datetime.now())
     exitcode = subprocess.call(disktype_command, shell=True, text=True)
 
-    premis_list.append(premis_dict(timestamp, 'forensic feature analysis', exitcode, disktype_command, 'disktype v9'))
+    premis_list.append(premis_dict(timestamp, 'forensic feature analysis', exitcode, disktype_command, 'Determined disk image file system information.', 'disktype v9'))
     
     #print out disktype info
     with open(disktype_output, 'r') as f:
@@ -1591,7 +1591,7 @@ def disk_image_info(imagefile, reports_dir):
     timestamp = str(datetime.datetime.now())
     exitcode = subprocess.call(fsstat_command, shell=True, text=True)
     
-    premis_list.append(premis_dict(timestamp, 'forensic feature analysis', exitcode, fsstat_command, fsstat_ver))
+    premis_list.append(premis_dict(timestamp, 'forensic feature analysis', exitcode, fsstat_command, 'Determined range of meta-data values (inode numbers) and content units (blocks or clusters)', fsstat_ver))
 
     #run ils to document inode information
     ils_output = os.path.join(reports_dir, 'ils.txt')
@@ -1601,7 +1601,7 @@ def disk_image_info(imagefile, reports_dir):
     timestamp = str(datetime.datetime.now())
     exitcode = subprocess.call(ils_command, shell=True, text=True) 
     
-    premis_list.append(premis_dict(timestamp, 'forensic feature analysis', exitcode, ils_command, ils_ver))
+    premis_list.append(premis_dict(timestamp, 'forensic feature analysis', exitcode, ils_command, 'Documented all inodes found on disk image.', ils_ver))
     
     #run mmls to document the layout of partitions in a volume system
     mmls_output = os.path.join(reports_dir, 'mmls.txt')
@@ -1611,7 +1611,7 @@ def disk_image_info(imagefile, reports_dir):
     timestamp = str(datetime.datetime.now())
     exitcode = subprocess.call(mmls_command, shell=True, text=True) 
     
-    premis_list.append(premis_dict(timestamp, 'forensic feature analysis', exitcode, mmls_command, mmls_ver))
+    premis_list.append(premis_dict(timestamp, 'forensic feature analysis', exitcode, mmls_command, 'Determined the layout of partitions in a volume system.', mmls_ver))
     
     pickleDump('premis_list', premis_list)
 
@@ -1630,7 +1630,7 @@ def dir_tree(target):
     exitcode = subprocess.call(tree_command, shell=True, text=True)
 
     premis_list = pickleLoad('premis_list')
-    premis_list.append(premis_dict(timestamp, 'metadata extraction', exitcode, tree_command, tree_ver))
+    premis_list.append(premis_dict(timestamp, 'metadata extraction', exitcode, tree_command, 'Documented the organization and structure of content within a directory tree.', tree_ver))
     pickleDump('premis_list', premis_list)
 
 def format_analysis(files_dir, reports_dir, log_dir, metadata, html):
