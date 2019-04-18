@@ -2069,6 +2069,8 @@ def closeUp():
     window.destroy()
 
 def verify_data():
+    ship_dir = bdpl_vars()['ship_dir']
+    
     #check that data has been entered by user
     if spreadsheet.get() == '':
         spreadsheet_copy = glob.glob(os.path.join(ship_dir, '*.xlsx'))
@@ -2221,6 +2223,7 @@ def check_unfinished():
                     print('\tThe following procedures have been completed:\n\t', '\n\t\t'.join(list(set((i['%s' % 'eventType'] for i in premis_list)))))
 
 def check_progress():
+    ship_dir = bdpl_vars()['ship_dir']
     
     if unit.get() == '':
         print('\n\nEnter a unit ID')
