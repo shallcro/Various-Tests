@@ -1,8 +1,9 @@
 @ECHO OFF
 
-:_START
-CLS
-TYPE C:\BDPL\scripts\bdpl.txt
+if "%1." =="." GOTO No1
+if "%2." =="."  GOTO No2
+
+TYPE %2\scripts\bdpl.txt
 ECHO.
 ECHO.
 ECHO.
@@ -10,26 +11,27 @@ ECHO.
 setlocal EnableDelayedExpansion
 IF NOT EXIST Z: (
   REM Get username
-  SET /P _name="Enter your IU username: "
- 
-  REM get server
-  REM SET /P _server=<C:\BDPL\resources\server.txt
+  SET /P _username="Enter your IU username: "
 
+  REM Server passed in as CMD.EXE arg
+  
   REM Connect to shared drive
-  NET USE Z: \\156.56.241.173\bdpl /user:ads\!_name! *
+  NET USE Z: %1 /user:ads\!_username! *
 )
 
-IF NOT EXIST Z: (
-  PAUSE
-  GOTO _START
-) ELSE (
-  CLS
-)
+CLS
+TYPE %2\scripts\bdpl.txt
+python %2\python3\bdpl_ingest.py
+EXIT
 
+:No1
+ECHO Missing server address
+ECHO.
+PAUSE
+EXIT
 
-TYPE C:\BDPL\scripts\bdpl.txt
-python C:\BDPL\scripts\python3\bdpl_ingest_20190329.pyw
-
-
-
-
+:No2
+ECHO Missing local directory argument
+ECHO.
+PAUSE
+EXIT

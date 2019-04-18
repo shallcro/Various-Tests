@@ -10,6 +10,7 @@ Copyright (c) 2017 Tim Walsh, distributed under The MIT License (MIT)
 http://bitarchivist.net
 
 """
+
 from collections import OrderedDict
 import csv
 import datetime
@@ -2308,7 +2309,7 @@ def main():
     
     global window, source, jobType, unit, barcode, mediaStatus, source1, source2, source3, source4, disk525, jobType1, jobType2, jobType3, jobType4, sourceDevice, barcodeEntry, sourceEntry, unitEntry, spreadsheet, coll_creator, coll_title, xfer_source, appraisal_notes, bdpl_notes, noteField, label_transcription, bdpl_home, home_dir, shipDateCombo
     
-    home_dir = 'C:\\BDPL'
+    home_dir = 'Z:\\'
     bdpl_home = 'C:\\BDPL'
     
     window = Tk()
