@@ -28,7 +28,7 @@ IF NOT EXIST Z: (
 
 
 TYPE C:\BDPL\scripts\bdpl.txt
-"C:\Python27\python.exe" C:\BDPL\scripts\python3\bdpl_ingest_20190329.pyw
+python C:\BDPL\scripts\python3\bdpl_ingest_20190329.pyw
 
 
 
