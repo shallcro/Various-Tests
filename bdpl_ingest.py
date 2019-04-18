@@ -86,7 +86,6 @@ def bdpl_vars():
     vars['dfxml_output'] = os.path.join(vars['metadata'], '%s-dfxml.xml' % barcode.get())
     vars['bulkext_dir'] = os.path.join(vars['temp_dir'], 'bulk_extractor')
     vars['bulkext_log'] = os.path.join(vars['log_dir'], 'bulkext-log.txt')
-    vars['media_pics'] = os.path.join(vars['metadata'], 'media-image')
     vars['media_image_dir'] = os.path.join(home_dir, 'media-images', '%s' % unit.get())
     
     return vars
@@ -2266,7 +2265,6 @@ def check_progress():
 def move_media_images():
     media_image_dir = bdpl_vars()['media_image_dir']
     unit_home = bdpl_vars()['unit_home']
-    media_pics = bdpl_vars()['media_pics']
     
     if unit.get() == '':
         '\n\nError; please make sure you have entered a 3-character unit abbreviation.'
@@ -2287,7 +2285,10 @@ def move_media_images():
         pic = f.split('-')[0]
         match = [s for s in shipList if pic in s]
         if len(match) > 0:
-            shutil.move(os.path.join(media_image_dir, f), match[0])
+            media_pics = os.path.join(match[0], 'media-image')
+            if not os.path.exists(media_pics):
+                os.makedirs(media_pics)
+            shutil.move(os.path.join(media_image_dir, f), media_pics)
         else:
             bad_file_list.append(f)
         
