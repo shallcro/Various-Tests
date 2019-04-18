@@ -2272,30 +2272,25 @@ def move_media_images():
         '\n\nError; please make sure you have entered a 3-character unit abbreviation.'
         return 
     
-    
     if len(os.listdir(media_image_dir)) == 0:
         print('\n\nNo images of media at %s' % media_image_dir)
         return
     
-    #for each shipment, get a list of barcodes; associate each list with the parent shipment ID in a dictionary
-    shipDict = {}
-    
-    comboList = glob.glob1("%s" % (bdpl_vars()['unit_home']), '*')
-    #exclude any drop box folders
-    
+    # get a list of barcodes in each shipment
+    shipList = list(filter(lambda f: os.path.isdir(f), glob.glob('%s\\*\\*' % unit_home)))
+
     #list of files with no parent
     bad_file_list = []
     
-    #loop through a list of all images in this folder
+    #loop through a list of all images in this folder; try to find match in list of barcodes; if not, add to 'bad file list'
     for f in os.listdir(media_image_dir):
-        #for each picture, also loop through our 
-        for item in comboList:
-            if os.path.exists(os.path.join(unit_home, item, f.split('-')[0])):
-                if not os.path.exists(media_pics):
-                    os.makedirs(media_pics)
-                shutil.move(os.path.join(media_image_dir, f), media_pics)
+        pic = f.split('-')[0]
+        match = [s for s in shipList if pic in s]
+        if len(match) > 0:
+            shutil.move(os.path.join(media_image_dir, f), match[0])
         else:
             bad_file_list.append(f)
+        
     if len(bad_file_list) > 0:
         print('\n\nFilenames for the following images do not match current barcodes:\n%s' % '\n'.join(bad_file_list))
         print('\nPlease correct filenames and try again.')
