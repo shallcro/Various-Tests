@@ -2285,7 +2285,7 @@ def move_media_images():
         pic = f.split('-')[0]
         match = [s for s in shipList if pic in s]
         if len(match) > 0:
-            media_pics = os.path.join(match[0], 'media-image')
+            media_pics = os.path.join(match[0], 'metadata', 'media-image')
             if not os.path.exists(media_pics):
                 os.makedirs(media_pics)
             shutil.move(os.path.join(media_image_dir, f), media_pics)
