@@ -1838,10 +1838,12 @@ def writePremisToExcel(ws, newrow, eventType, premis_list):
         ws.cell(row=newrow, column=14, value = "Failure")
 
 def writeNote():
+    ship_dir = bdpl_vars()['ship_dir']
+    
     if not verify_data():
         return
     
-    spreadsheet_copy = glob.glob(os.path.join(home_dir, unit.get(), '*.xlsx'))[0]
+    spreadsheet_copy = glob.glob(os.path.join(ship_dir, '*.xlsx'))[0]
     
     wb = openpyxl.load_workbook(spreadsheet_copy)    
     
@@ -1913,11 +1915,13 @@ def writeNote():
     print('\n\nInformation saved to Appraisal worksheet.') 
     
 def writeSpreadsheet():
+    ship_dir = bdpl_vars()['ship_dir']
+    
     premis_list = pickleLoad('premis_list')
             
     bc_dict = pickleLoad('bc_dict')
     
-    spreadsheet_copy = glob.glob(os.path.join(home_dir, unit.get(), '*.xlsx'))[0]
+    spreadsheet_copy = glob.glob(os.path.join(ship_dir, '*.xlsx'))[0]
     
     wb = openpyxl.load_workbook(spreadsheet_copy)
     ws = wb['Appraisal']
@@ -2067,7 +2071,7 @@ def closeUp():
 def verify_data():
     #check that data has been entered by user
     if spreadsheet.get() == '':
-        spreadsheet_copy = glob.glob(os.path.join(home_dir, unit.get(), '*.xlsx'))
+        spreadsheet_copy = glob.glob(os.path.join(ship_dir, '*.xlsx'))
         if spreadsheet_copy:
             spreadsheet.set(spreadsheet_copy[0])
         else:
@@ -2222,7 +2226,7 @@ def check_progress():
         print('\n\nEnter a unit ID')
         return
     
-    spreadsheet_copy = glob.glob(os.path.join(home_dir, unit.get(), '*.xlsx'))[0]
+    spreadsheet_copy = glob.glob(os.path.join(ship_dir, '*.xlsx'))[0]
         
     wb = openpyxl.load_workbook(spreadsheet_copy)
     
