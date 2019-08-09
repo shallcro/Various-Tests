@@ -1,3 +1,4 @@
+'''script to test process of identifying partitions, extracting files, and then fixing dates.  Added to bdpl_ingest.py'''
 import subprocess
 import os
 import re

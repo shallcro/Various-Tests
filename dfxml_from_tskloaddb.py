@@ -1,5 +1,4 @@
-<<<<<<< HEAD
-#This was taken from bdpl_ingest.py; probably needs some additional work to actually run...
+#This was taken from bdpl_ingest.py; probably needs some additional work to actually run, but wanted to preserve some key steps to create DFXML from a tsk_loaddb output.
 
 def main():
     if not tsk_loaddb(tsk_db, bdpl_vars()['imagefile'])

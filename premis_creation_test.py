@@ -1,3 +1,5 @@
+'''script to test creating PREMIS metadata with lxml etree'''
+
 from lxml import etree as ET
 
 barcode = 'jjjj'
