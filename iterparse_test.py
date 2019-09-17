@@ -1,5 +1,6 @@
 from lxml import etree
 import pickle
+import datetime
 
 dfxml_output = 'Z:/TEST/files/30000152020792-dfxml.xml'
 temp_dir = 'Z:/UAC/ingest/20190819/30000152020792/temp'
@@ -37,10 +38,10 @@ for event, element in etree.iterparse(dfxml_output, events = ("end",), tag="file
         if child.tag == "hashdigest":
             checksum = child.text
         if child.tag == "mtime":
-            mtime = child.text
+            mtime = datetime.datetime.utcfromtimestamp(int(child.text)).isoformat()
             mt = True
         if child.tag == "crtime" and mt == False:
-            mtime = child.text
+            mtime = datetime.datetime.utcfromtimestamp(int(child.text)).isoformat()
 
     if good:
         file_dict = { 'name' : target, 'size' : size, 'mtime' : mtime, 'checksum' : checksum}
