@@ -24,6 +24,7 @@ for event, element in etree.iterparse(dfxml_output, events = ("end",), tag="file
         
         if child.tag == "filename":
             target = child.text
+            print('\rCollecting stats for: %s' % target, end='')
         if child.tag == "name_type":
             if child.text != "r":
                 element.clear()
