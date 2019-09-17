@@ -114,7 +114,6 @@ def main():
     
     with open(premis_file, 'wb') as f:
         pickle.dump(premis_list, f)
-    pickleDump('premis_list', premis_list)
         
 if __name__ == "__main__":
     main()
