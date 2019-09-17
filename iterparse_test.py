@@ -19,6 +19,9 @@ for event, element in etree.iterparse(dfxml_output, events = ("end",), tag="file
     good = True
     mt = False
     mtime = 'undated'
+    target = ''
+    size = ''
+    checksum = ''
     
     for child in element:
         
@@ -45,7 +48,7 @@ for event, element in etree.iterparse(dfxml_output, events = ("end",), tag="file
         if child.tag == "crtime" and mt == False:
             mtime = datetime.datetime.utcfromtimestamp(int(child.text)).isoformat()
 
-    if good:
+    if good and not '' in file_dict.values():
         file_dict = { 'name' : target, 'size' : size, 'mtime' : mtime, 'checksum' : checksum}
         file_stats.append(file_dict)
     
