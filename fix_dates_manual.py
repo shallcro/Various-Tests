@@ -27,6 +27,12 @@ import glob
 import hashlib
 import Objects
 
+def time_to_int(str_time):
+    """ Convert datetime to unix integer value """
+    dt = time.mktime(datetime.datetime.strptime(str_time, 
+        "%Y-%m-%dT%H:%M:%S").timetuple())
+    return dt
+
 def premis_dict(timestamp, event_type, event_outcome, event_detail, event_detail_note, agent_id):
     temp_dict = {}
     temp_dict['eventType'] = event_type
