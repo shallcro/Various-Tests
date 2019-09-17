@@ -1,6 +1,7 @@
 from lxml import etree
 import pickle
 import datetime
+import os
 
 dfxml_output = input('Path to dfxml: ')
 temp_dir = input('Path to temp folder: ')
