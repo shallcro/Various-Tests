@@ -25,6 +25,7 @@ import time
 import openpyxl
 import glob
 import hashlib
+import Objects
 
 def premis_dict(timestamp, event_type, event_outcome, event_detail, event_detail_note, agent_id):
     temp_dict = {}
