@@ -2,15 +2,15 @@ from lxml import etree
 import pickle
 import datetime
 
-dfxml_output = 'Z:/TEST/files/30000152020792-dfxml.xml'
-temp_dir = 'Z:/UAC/ingest/20190819/30000152020792/temp'
+dfxml_output = input('Path to dfxml: ')
+temp_dir = input('Path to temp folder: ')
 
 file_stats = []
 
 counter = 0
 
 for event, element in etree.iterparse(dfxml_output, events = ("end",), tag="fileobject"):
-    counter =+ 1
+    counter += 1
     print('\nWorking on item ', counter)
     file_dict = {}
     
