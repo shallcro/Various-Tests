@@ -45,10 +45,13 @@ def main():
             stats[unit]['count'] += 1
             stats[unit]['items'] += int(row[2].value)
             stats[unit]['size'] += int(row[5].value)
-        
+    
+    unit_totals = {}
     for key, value in stats.items():
         sized = convert_size(value['size'])
         print('Unit: %s\nItems: %s\nSize: %s\n' % (key, value['items'], sized))
+        unit_totals[key] = {'items' : value['items'], 'size' : sized}
+        
         
     ws2 = wb['Item']
     
@@ -87,6 +90,11 @@ def main():
             sized = convert_size(info['size'])
             print('\t\tOverall size: ', sized)
         
+        print('\tTOTAL:\n\t\tNumber of items: %s\n\t\tOverall size: %s' % (unit_totals[unit]['items'], unit_totals[unit]['size']))
+    
+    
+    print('\n\n')
+    
     for key, values in sorted(by_year.items()):
         print(key, ':', convert_size(sum(values[0])), '(%s items)' % sum(values[1]))
     
