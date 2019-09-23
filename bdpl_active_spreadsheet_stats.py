@@ -53,6 +53,11 @@ def main():
                        
             spreadsheet = glob.glob(os.path.join(home_dir, shipment, '*.xlsx'))[0]
             
+            spreadsheet_name = os.path.basename(spreadsheet)
+            
+            if os.path.exists(os.path.join(workspace, project, 'completed_shipments', spreadsheet_name)):
+                continue
+            
             wb = openpyxl.load_workbook(spreadsheet)
             
             ws = wb['Appraisal']
