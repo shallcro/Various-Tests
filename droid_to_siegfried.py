@@ -1,14 +1,14 @@
 import csv
 import os
+import pickle
 
 infile = input('Enter path to csv: ')
 
 report_dir = os.path.dirname(infile)
-
-unidentified = os.path.join(report_dir, 'unidentified.csv')
-
 outfile = os.path.join(report_dir, 'siegfried.csv')
+
 counter = 0
+
 with open(outfile, 'w', newline='') as f1:
     csvWriter = csv.writer(f1)
     header = ['filename', 'filesize', 'modified', 'errors', 'namespace', 'id', 'format', 'version', 'mime', 'basis', 'warning']
@@ -41,8 +41,4 @@ with open(outfile, 'w', newline='') as f1:
             
             data = [filename, filesize, modified, errors, namespace, id, format, version, mime, basis, warning]
             csvWriter.writerow(data)
-            
-            if id == 'UNKNOWN':
-                with open(unidentified, 'a', newline='') as f3:
-                    csvWriter2 = csv.writer(f3)
-                    csvWriter2.writerow(data)
+           
