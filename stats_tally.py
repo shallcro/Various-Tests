@@ -20,7 +20,10 @@ def convert_size(size):
     return '%s %s' % (s,size_name[i])
 
 def main():
-    book = input('\nPath to master spreadsheet: ')
+    if not os.path.exists('Y:/spreadsheets/bdpl_master_spreadsheet.xlsx'):
+        book = input('\nPath to master spreadsheet: ')
+    else:
+        book = 'Y:/spreadsheets/bdpl_master_spreadsheet.xlsx'
     
     spreadsheet = os.path.join('C:/BDPL/', '%s_COPY.xlsx' % os.path.basename(book))
     
@@ -36,67 +39,72 @@ def main():
 
     stats = {}
 
-
-    for row in iterrows:
-        unit = row[0].value.split()[0]
-        if not unit in stats.keys():
-            stats[unit] = {'count' : 1, 'items' : int(row[2].value), 'size' : int(row[5].value)}
-        else:
-            stats[unit]['count'] += 1
-            stats[unit]['items'] += int(row[2].value)
-            stats[unit]['size'] += int(row[5].value)
-    
-    unit_totals = {}
-    for key, value in stats.items():
-        sized = convert_size(value['size'])
-        print('Unit: %s\nItems: %s\nSize: %s\n' % (key, value['items'], sized))
-        unit_totals[key] = {'items' : value['items'], 'size' : sized}
-        
-        
-    ws2 = wb['Item']
-    
-    iterrows2 = ws2.iter_rows()
-    next(iterrows2)
-    
-    stats_items = {}
-    by_year = {}
-    for row in iterrows2:
-        unit = row[1].value
-        year = str(row[14].value)[:4]
-        
-        if year not in by_year.keys():
-            by_year[year] = [[int(row[17].value)], [1]]
-        else:
-            by_year[year][0].append(int(row[17].value))
-            by_year[year][1].append(1)
-        
-        if not unit in stats_items.keys():
-            #print('NEW UNIT: %s, year: %s' %(unit, year))
-            stats_items[unit] = {year : {'items' : 1, 'size' : int(row[17].value)}}
-        else:
-            #print('\told unit: %s, NEW YEAR: %s' %(unit, year))
-            if not year in stats_items[unit].keys():
-                stats_items[unit][year] = {'items' : 1, 'size' : int(row[17].value)}
+    with open('C:/BDPL/current_stats.txt', 'w') as f:
+        for row in iterrows:
+            unit = row[0].value.split()[0]
+            if not unit in stats.keys():
+                stats[unit] = {'count' : 1, 'items' : int(row[2].value), 'size' : int(row[5].value)}
             else:
-                
-                stats_items[unit][year]['items'] += 1
-                stats_items[unit][year]['size'] += int(row[17].value)
-    
-    for unit, data in stats_items.items():
-        print(unit)
-        for year, info in sorted(data.items()):
-            print('\t', year)
-            print('\t\tNumber of items: ', info['items'])
-            sized = convert_size(info['size'])
-            print('\t\tOverall size: ', sized)
+                stats[unit]['count'] += 1
+                stats[unit]['items'] += int(row[2].value)
+                stats[unit]['size'] += int(row[5].value)
         
-        print('\tTOTAL:\n\t\tNumber of items: %s\n\t\tOverall size: %s' % (unit_totals[unit]['items'], unit_totals[unit]['size']))
-    
-    
-    print('\n\n')
-    
-    for key, values in sorted(by_year.items()):
-        print(key, ':', convert_size(sum(values[0])), '(%s items)' % sum(values[1]))
+        unit_totals = {}
+        for key, value in stats.items():
+            sized = convert_size(value['size'])
+            print('Unit: %s\nItems: %s\nSize: %s\n' % (key, value['items'], sized))
+            unit_totals[key] = {'items' : value['items'], 'size' : sized}
+            
+            
+        ws2 = wb['Item']
+        
+        iterrows2 = ws2.iter_rows()
+        next(iterrows2)
+        
+        stats_items = {}
+        by_year = {}
+        for row in iterrows2:
+            unit = row[1].value
+            year = str(row[14].value)[:4]
+            
+            if year not in by_year.keys():
+                by_year[year] = [[int(row[17].value)], [1]]
+            else:
+                by_year[year][0].append(int(row[17].value))
+                by_year[year][1].append(1)
+            
+            if not unit in stats_items.keys():
+                stats_items[unit] = {year : {'items' : 1, 'size' : int(row[17].value)}}
+            else:
+                if not year in stats_items[unit].keys():
+                    stats_items[unit][year] = {'items' : 1, 'size' : int(row[17].value)}
+                else:
+                    
+                    stats_items[unit][year]['items'] += 1
+                    stats_items[unit][year]['size'] += int(row[17].value)
+        
+        for unit, data in stats_items.items():
+            f.write('%s\n' % unit)
+            print(unit)
+            for year, info in sorted(data.items()):
+                print('\t', year)
+                print('\t\tNumber of items: ', info['items'])
+                sized = convert_size(info['size'])
+                print('\t\tOverall size: ', sized)
+                
+                f.write('\t%s\n\t\tNumber of items: %s\n\t\tOverall size: %s\n' % (year, info['items'], sized))
+            
+            print('\tTOTAL:\n\t\tNumber of items: %s\n\t\tOverall size: %s' % (unit_totals[unit]['items'], unit_totals[unit]['size']))
+            f.write('\tTOTAL:\n\t\tNumber of items: %s\n\t\tOverall size: %s\n' % (unit_totals[unit]['items'], unit_totals[unit]['size']))
+        
+        print('\n\n')
+        f.write('\n\n')
+        
+        for key, values in sorted(by_year.items()):
+            print(key, ':', convert_size(sum(values[0])), '(%s items)' % sum(values[1]))
+            f.write('%s : %s (%s items)\n' % (key, convert_size(sum(values[0])), sum(values[1])))
+        
+    print('\n\nText file with these statistics located at: C:\BDPL\current_stats.txt')
     
 if __name__ == '__main__':
     main()
