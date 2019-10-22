@@ -7,6 +7,7 @@ import os
 import glob
 import collections
 import math
+import subprocess
 
 def convert_size(size):
     # convert size to human-readable form
@@ -23,7 +24,7 @@ def convert_size(size):
 def main():
 
     #add any other temp/work folders, if they are present
-    working_dirs = ['TEST', 'media-images', 'bdpl_transfer_lists']
+    working_dirs = ['TEST', 'media-images', 'bdpl_transfer_lists', 'Ripstation']
     
     #assumes that bdpl\workspace is mapped to Z:\ drive; change if needed. Get a list of projects from that location. 
     workspace = 'Z:\\'
@@ -33,7 +34,9 @@ def main():
     projects = [dir for dir in projects if dir not in working_dirs]
     
     #specify a location for output file
-    output = input('Enter Python-appropriate path to output file: ')
+    output = "C:/BDPL/current_stats.txt"
+    if os.path.exists(output):
+        os.remove(output)
 
     stats = {'total_size' : 0, 'total_files' : 0, 'total_items' : 0}
     
@@ -44,6 +47,9 @@ def main():
         
         home_dir = os.path.join(workspace, project, 'ingest')
         
+        if not os.path.exists(home_dir):
+            continue
+        
         stats[project] = []
         
         for shipment in os.listdir(home_dir):
@@ -51,7 +57,10 @@ def main():
             
             temp = {}
                        
-            spreadsheet = glob.glob(os.path.join(home_dir, shipment, '*.xlsx'))[0]
+            if glob.glob(os.path.join(home_dir, shipment, '*.xlsx')):
+                spreadsheet = glob.glob(os.path.join(home_dir, shipment, '*.xlsx'))[0]
+            else:
+                continue
             
             spreadsheet_name = os.path.basename(spreadsheet)
             
@@ -141,6 +150,11 @@ def main():
         f.write('\tItems: %s\n' % stats['total_items'])
         f.write('\tFiles: %s\n' % stats['total_files'])
         f.write('\tSize: %s (%s)\n' % (stats['total_size'], convert_size(stats['total_size'])))
+        
+    print('\n\nStatistics for current BDPL work (not deposited to SDA) saved to %s' % output)
+    
+    cmd = 'notepad %s' % output
+    subprocess.call(cmd)
 
 if __name__ == '__main__':
     main()       

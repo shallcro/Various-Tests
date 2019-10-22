@@ -6,6 +6,7 @@ import openpyxl
 import os
 import math
 import shutil
+import subprocess
 
 def convert_size(size):
     # convert size to human-readable form
@@ -20,10 +21,10 @@ def convert_size(size):
     return '%s %s' % (s,size_name[i])
 
 def main():
-    if not os.path.exists('Y:/spreadsheets/bdpl_master_spreadsheet.xlsx'):
+    if not os.path.exists('W:/spreadsheets/bdpl_master_spreadsheet.xlsx'):
         book = input('\nPath to master spreadsheet: ')
     else:
-        book = 'Y:/spreadsheets/bdpl_master_spreadsheet.xlsx'
+        book = 'W:/spreadsheets/bdpl_master_spreadsheet.xlsx'
     
     spreadsheet = os.path.join('C:/BDPL/', '%s_COPY.xlsx' % os.path.basename(book))
     
@@ -38,8 +39,12 @@ def main():
     next(iterrows)
 
     stats = {}
+    
+    output = 'C:/BDPL/deposited_content_stats.txt'
+    if os.path.exists(output):
+        os.remove(output)
 
-    with open('C:/BDPL/current_stats.txt', 'w') as f:
+    with open(output, 'w') as f:
         for row in iterrows:
             unit = row[0].value.split()[0]
             if not unit in stats.keys():
@@ -104,7 +109,14 @@ def main():
             print(key, ':', convert_size(sum(values[0])), '(%s items)' % sum(values[1]))
             f.write('%s : %s (%s items)\n' % (key, convert_size(sum(values[0])), sum(values[1])))
         
-    print('\n\nText file with these statistics located at: C:\BDPL\current_stats.txt')
+    print('\n\nText file with these statistics located at: %s' % output)
+    
+    os.remove(spreadsheet)
+    
+    cmd = 'notepad %s' % output
+    subprocess.call(cmd)
+    
+    
     
 if __name__ == '__main__':
     main()
