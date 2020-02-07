@@ -1,5 +1,5 @@
 '''
-Script to compile cumulative stats
+Script to compile cumulative master_stats
 '''
 
 import openpyxl
@@ -26,44 +26,44 @@ def main():
     else:
         book = 'W:/spreadsheets/bdpl_master_spreadsheet.xlsx'
     
-    spreadsheet = os.path.join('C:/BDPL/', '%s_COPY.xlsx' % os.path.basename(book))
+    spreadsheet_copy = os.path.join('C:/BDPL/', '%s_COPY.xlsx' % os.path.basename(book))
     
-    shutil.copy(book, spreadsheet)
+    shutil.copy(book, spreadsheet_copy)
 
-    wb = openpyxl.load_workbook(spreadsheet)
+    wb = openpyxl.load_workbook(spreadsheet_copy)
 
-    ws = wb['Cumulative']
+    ws_master_all = wb['Cumulative']
 
-    iterrows = ws.iter_rows()
+    iterrows = ws_master_all.iter_rows()
 
     next(iterrows)
 
-    stats = {}
+    master_stats = {}
     
-    output = 'C:/BDPL/deposited_content_stats.txt'
-    if os.path.exists(output):
-        os.remove(output)
+    master_output = 'C:/BDPL/deposited_content_stats.txt'
+    if os.path.exists(master_output):
+        os.remove(master_output)
 
-    with open(output, 'w') as f:
+    with open(master_output, 'w') as f:
         for row in iterrows:
             unit = row[0].value.split()[0]
-            if not unit in stats.keys():
-                stats[unit] = {'count' : 1, 'items' : int(row[2].value), 'size' : int(row[5].value)}
+            if not unit in master_stats.keys():
+                master_stats[unit] = {'count' : 1, 'items' : int(row[2].value), 'size' : int(row[5].value)}
             else:
-                stats[unit]['count'] += 1
-                stats[unit]['items'] += int(row[2].value)
-                stats[unit]['size'] += int(row[5].value)
+                master_stats[unit]['count'] += 1
+                master_stats[unit]['items'] += int(row[2].value)
+                master_stats[unit]['size'] += int(row[5].value)
         
         unit_totals = {}
-        for key, value in stats.items():
+        for key, value in master_stats.items():
             sized = convert_size(value['size'])
             print('Unit: %s\nItems: %s\nSize: %s\n' % (key, value['items'], sized))
             unit_totals[key] = {'items' : value['items'], 'size' : sized}
             
             
-        ws2 = wb['Item']
+        ws_master_item = wb['Item']
         
-        iterrows2 = ws2.iter_rows()
+        iterrows2 = ws_master_item.iter_rows()
         next(iterrows2)
         
         stats_items = {}
@@ -109,11 +109,11 @@ def main():
             print(key, ':', convert_size(sum(values[0])), '(%s items)' % sum(values[1]))
             f.write('%s : %s (%s items)\n' % (key, convert_size(sum(values[0])), sum(values[1])))
         
-    print('\n\nText file with these statistics located at: %s' % output)
+    print('\n\nText file with these statistics located at: %s' % master_output)
     
-    os.remove(spreadsheet)
+    os.remove(spreadsheet_copy)
     
-    cmd = 'notepad %s' % output
+    cmd = 'notepad %s' % master_output
     subprocess.call(cmd)
     
     

@@ -1,6 +1,7 @@
 import csv
 import os
 import pickle
+from urllib.parse import unquote
 
 infile = input('Enter path to csv: ')
 
@@ -20,7 +21,11 @@ with open(outfile, 'w', newline='') as f1:
             counter+=1
             print('\rWorking on row %d' % counter, end='')
             
-            filename = row[2].split('file:/', 1)[1]
+            if 'zip:file:' in row[2]:
+                filename = row[2].split('zip:file:/', 1)[1].replace('.zip!', '.zip#').replace('/', '\\')
+            else:
+                filename = row[2].split('file:/', 1)[1]
+            filename = unquote(filename)
             filesize = row[7]
             modified = row[10]
             errors = ''
