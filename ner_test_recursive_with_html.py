@@ -21,6 +21,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import textwrap
 import chardet
+import shutil
 
 
 def take(n, iterable):
@@ -48,7 +49,7 @@ def absolute_value(pct, allvals):
     absolute = int(pct/100.*np.sum(allvals))
     return "{:d} hits".format(absolute)
 
-def entity_separator(doc_text, nlp, person, norp, fac, org, gpe, loc, doc_list):
+def entity_separator(doc_text, nlp, person, norp, fac, org, gpe, loc, product, event, doc_list):
     
     doc = nlp(doc_text)
     
@@ -65,6 +66,10 @@ def entity_separator(doc_text, nlp, person, norp, fac, org, gpe, loc, doc_list):
             gpe.append(ent.text)
         elif ent.label_ == 'LOC':
             loc.append(ent.text)
+        elif ent.label_ == 'PRODUCT':
+            product.append(ent.text)
+        elif ent.label_ == 'EVENT':
+            event.append(ent.text)
         else:
             continue
             
@@ -73,7 +78,7 @@ def entity_separator(doc_text, nlp, person, norp, fac, org, gpe, loc, doc_list):
     no_stops = remove_stopwords(lemmatized)
     doc_list.append(no_stops)
     
-    return person, norp, fac, org, gpe, loc, doc_list
+    return person, norp, fac, org, gpe, loc, product, event, doc_list
 
 def main():
     #load English model. Small provides good enough NER while being faster than en_core_web_md
@@ -88,9 +93,12 @@ def main():
     output_folder = os.path.join('C:/temp', 'ner-testing', shipmentID)
     output_files = os.path.join(output_folder, 'files')
     output = os.path.join(output_folder, '{}_ner-report.html'.format(shipmentID))
+
+    css_file = 'C:/BDPL/resources/NER/mystyle.css'
     
     if not os.path.exists(output_files):
         os.makedirs(output_files) 
+    
     
     #get spreadsheet and set openpyxl variables    
     spreadsheet = glob.glob(os.path.join(ship_dir, '*.xlsx'))[0]
@@ -100,33 +108,63 @@ def main():
     #start html doc
     html = etree.Element('html')
     head = etree.SubElement(html, 'head')
-    style = etree.SubElement(head, 'style')
-    style.text = "table, th, td {padding: 10px; border: 1px solid black; border-collapse: collapse;}"
+    script = etree.SubElement(head, 'script', src="https://ajax.googleapis.com/ajax/libs/jquery/3.4.1/jquery.min.js")
+    link = etree.SubElement(head, 'link')
+    link.attrib['rel'] = "stylesheet"
+    link.attrib['type'] = "text/css"
+    link.attrib['href'] = "./files/mystyle.css" 
     body = etree.SubElement(html, 'body')
     h1 = etree.SubElement(body, 'h1')
     h1.text ="Content Analysis"
-    table = etree.SubElement(body, 'table')
+    
+    div = etree.SubElement(body, 'div')
+    div.attrib['class'] = 'scrollable'
+    
+    table = etree.SubElement(div, 'table')
     tr = etree.SubElement(table, 'tr')
+    
     th = etree.SubElement(tr, 'th')
     th.text = 'Object'
+    
     th = etree.SubElement(tr, 'th')
     th.text = 'Creator'
+    
     th = etree.SubElement(tr, 'th')
     th.text = 'Label Transcription'
+    
     th = etree.SubElement(tr, 'th')
     th.text = 'Initial Appraisal'
+    
     th = etree.SubElement(tr, 'th')
     th.text = 'Named Entities: People'
+    
+    th = etree.SubElement(tr, 'th')
+    th.text = 'Named Entities: Nationalities or religious/political groups'
+   
+    th = etree.SubElement(tr, 'th')
+    th.text = 'Named Entities: Buildings and Facilities'
+    
     th = etree.SubElement(tr, 'th')
     th.text = 'Named Entities: Organizations'
+    
     th = etree.SubElement(tr, 'th')
-    th.text = 'Named Entities: Locations'
+    th.text = 'Named Entities: Countries, cities, states'
+    
+    th = etree.SubElement(tr, 'th')
+    th.text = 'Named Entities: Geographic Features/Locations'
+    
+    th = etree.SubElement(tr, 'th')
+    th.text = 'Named Entities: Products'
+    
+    th = etree.SubElement(tr, 'th')
+    th.text = 'Named Entities: Events'
+    
     th = etree.SubElement(tr, 'th')
     th.text = 'Topic Modeling'
     
     for item_barcode in [d for d in os.listdir(ship_dir) if os.path.isdir(os.path.join(ship_dir, d))]:
-        if not '30000152012583' in item_barcode:
-            continue
+        # if not '30000152027102' in item_barcode:
+            # continue
         print('\nWorking on: ', item_barcode)
         
         found = False
@@ -168,6 +206,9 @@ def main():
         org = []
         gpe = []
         loc = []
+        product = []
+        event = []
+        
         
         for root, dirs, files, in os.walk(files_dir):
             for f in files:
@@ -190,12 +231,13 @@ def main():
                 combined_text = ' '.join(t for t in text)
                 
                 if len(combined_text) > 1000000:
+                    continue
                     for chunk in textwrap.wrap(combined_text, 900000):
-                        person, norp, fac, org, gpe, loc, doc_list = entity_separator(chunk, nlp, person, norp, fac, org, gpe, loc, doc_list)
+                        person, norp, fac, org, gpe, loc, product, event, doc_list = entity_separator(chunk, nlp, person, norp, fac, org, gpe, loc, product, event, doc_list)
                 else:
-                    person, norp, fac, org, gpe, loc, doc_list = entity_separator(combined_text, nlp, person, norp, fac, org, gpe, loc, doc_list)
+                    person, norp, fac, org, gpe, loc, product, event, doc_list = entity_separator(combined_text, nlp, person, norp, fac, org, gpe, loc, product, event, doc_list)
         
-        for ls in [person, org, gpe]:
+        for ls in [person, norp, fac, org, gpe, loc, product, event]:
            
             #tally the number of unique entities in each list and sort the resulting dictionary so we can present results in descending order, with the most frequent first.  Reconciling near matches or eliminating false positives would require too much human intervention
             tally = dict(Counter(ls))
@@ -217,6 +259,16 @@ def main():
                     graph_title = 'organizations'
                 elif ls == gpe:
                     graph_title = 'countries-cities-states'  
+                elif ls == norp:
+                    graph_title = 'groups'
+                elif ls == loc:
+                    graph_title = 'geographic-features'
+                elif ls == fac:
+                    graph_title = 'buildings-facilities'
+                elif ls == product:
+                    graph_title = 'products'
+                elif ls == event:
+                    graph_title = 'events'
                 
                 current_chart = os.path.join(output_files, '{}-{}.png'.format(item_barcode, graph_title))
                 current_report = os.path.join(output_files, '{}-{}.txt'.format(item_barcode, graph_title)) 
@@ -258,7 +310,8 @@ def main():
                 
                 #determine which results are above average; the rest are 'others'.  TOO MANY AND CHART IS UNREADABLE' WHAT IS UPPER LIMIT?
                 ner_median = statistics.median(sorted(set(list(sorted_tally.values()))))
-                ner_q3 = np.percentile(sorted(set(list(sorted_tally.values()))), 75)
+                percentile = 90
+                ner_percentile = np.percentile(sorted(set(list(sorted_tally.values()))), percentile)
                 
                 if len(sorted_tally) <= 10:
                     results = sorted_tally
@@ -269,8 +322,8 @@ def main():
                 
                 #if we have too many results, we won't be able to view results; use Q3 as cut-off
                 if len(results) > 25:
-                    results = {k:v for k, v in sorted_tally.items() if v > ner_q3}
-                    others = {k:v for k, v in sorted_tally.items() if v <= ner_q3}
+                    results = {k:v for k, v in sorted_tally.items() if v > ner_percentile}
+                    others = {k:v for k, v in sorted_tally.items() if v <= ner_percentile}
                 
                 #write to html in a list; for each list, include a link to pie chart
                 labels = []
@@ -332,7 +385,9 @@ def main():
     
     #write html to file
     html_doc = etree.ElementTree(html)
-    html_doc.write(output, method="html", pretty_print=True)        
+    html_doc.write(output, method="html", pretty_print=True)      
+
+    shutil.copy(css_file, output_files)
 
 
 if __name__ == "__main__":
