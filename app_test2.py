@@ -2,6 +2,7 @@
 import tkinter as tk
 from tkinter import ttk
 from tkinter import filedialog
+import webbrowser
 
 
 '''
@@ -47,22 +48,21 @@ class BatchInformationFrame(tk.Frame):
         unit_shipment_date['values'] = comboList
         '''
 
+
 class BDPLingestApp(tk.Frame):
     def __init__(self, parent):
-        #set up variables
-        #global content_source
 
+        #create main frame in notebook
+        tk.Frame.__init__(self, parent)
+        self.pack(fill=tk.BOTH, expand=True)
+
+        #set up variables
         self.jobType = tk.StringVar()
         self.jobType.set(None)
         self.content_source = tk.StringVar()
         self.item_barcode = tk.StringVar()
         self.unit_name = tk.StringVar()
         self.shipmentDate = tk.StringVar()
-
-        #create main frame in notebook
-        tk.Frame.__init__(self, parent, height=750, width=650)
-        self.pack(fill=tk.BOTH, expand=True)
-        #self.pack_propagate(0)
 
         #set up buttons to handle all major actions
         self.button_frame = tk.LabelFrame(self, text='BDPL Ingest Actions')
@@ -191,7 +191,7 @@ class RipstationIngestApp(tk.Frame):
     def __init__(self, parent):
         tk.Frame.__init__(self, parent) #, height=750, width=650)
         self.pack(fill=tk.BOTH, expand=True)
-        tk.Label(text='hi').pack()
+        tk.Label(self, text='hi').pack()
         #self.pack_propagate(0)
         #
         # self.batch_info = BatchInformationFrame(self, self.item_barcode, self.unit_name, self.shipmentDate)
@@ -200,10 +200,9 @@ class RipstationIngestApp(tk.Frame):
 class NotebookApp(ttk.Notebook):
     def __init__(self, parent):
         ttk.Notebook.__init__(self, parent)
-        # self.parent = parent
+        self.pack(pady=10, fill=tk.BOTH, expand=True)
 
-        # self.notebook = ttk.Notebook(self.parent)
-        self.pack(fill=tk.BOTH, expand=True)
+        self.parent = parent
 
         self.bdpl_ingest_frame = BDPLingestApp(self)
 
@@ -211,6 +210,13 @@ class NotebookApp(ttk.Notebook):
 
         self.add(self.bdpl_ingest_frame, text='BDPL Ingest')
         self.add(self.ripstation_ingest_frame, text='Ripstation Ingest')
+        
+        self.parent.option_add('*tearOff', False)
+        self.menubar = tk.Menu(self.parent)
+        self.parent.config(menu = self.menubar)
+        self.help_ = tk.Menu(self.menubar)
+        self.menubar.add_cascade(menu=self.help_, label='Help')
+        self.help_.add_command(label='Open BDPL wiki', command = lambda: webbrowser.open_new(r"https://wiki.dlib.indiana.edu/display/DIGIPRES/Born+Digital+Preservation+Lab"))
 
 
 
