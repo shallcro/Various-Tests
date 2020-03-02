@@ -22,6 +22,7 @@ import numpy as np
 import textwrap
 import chardet
 import shutil
+import sys
 
 
 def take(n, iterable):
@@ -83,10 +84,13 @@ def entity_separator(doc_text, nlp, person, norp, fac, org, gpe, loc, product, e
 def main():
     #load English model. Small provides good enough NER while being faster than en_core_web_md
     nlp = spacy.load("en_core_web_sm")
-    #nlp.add_pipe(lemmatizer,name='lemmatizer',after='ner')
         
     #set variables
-    ship_dir = argv[1]
+    try:
+        ship_dir = argv[1]
+    except IndexError:
+        print('\n\nWarning: missing "shipment" argument.  Include a python-friendly path to the directory you want to run NER/topic modeling on.')
+        sys.exit()
     
     shipmentID = os.path.basename(ship_dir)
     
@@ -195,8 +199,6 @@ def main():
         
         if not os.path.exists(files_dir):
             continue
-        #metadata = os.path.join(ship_dir, item_barcode, 'metadata')
-        #reports_dir = os.path.join(metadata, 'reports')
         
         #create lists to store extracted entities and text for gensim
         doc_list = []
@@ -209,7 +211,7 @@ def main():
         product = []
         event = []
         
-        
+        #Loop through files in our item file_dir. 
         for root, dirs, files, in os.walk(files_dir):
             for f in files:
                 
@@ -217,19 +219,23 @@ def main():
                 
                 print('\tProcessing: {}\n'.format(ner_target))
                 
+                #use python-tika 'parser' to pull text from file; skip if we get UnicodeEncodeError (will try to figure out how to handle those later)
                 try:
                     content = parser.from_file(ner_target)
                 except UnicodeEncodeError:
                     continue
-                    
+                
+                #isolate the 'content' from python-tika parser output
                 if 'content' in content:
                     text = content['content']
                 else:
                     continue
                 
+                #to make our results a little more manageable, 'split' the content to remove newlines, tabs, etc.  Then rejoin everything (separating each word by a space)
                 text = str(text).split()
                 combined_text = ' '.join(t for t in text)
                 
+                #We will now send our text to the 'entity_separator' function--created so that we could handle all of our text in the same way, as we discovered that Spacy will run out of memory if the text is too big.  To handle that, we check size; if text is too big, we will just process one chunk of it at a time and concatenate the results.
                 if len(combined_text) > 1000000:
                     continue
                     for chunk in textwrap.wrap(combined_text, 900000):
@@ -237,6 +243,7 @@ def main():
                 else:
                     person, norp, fac, org, gpe, loc, product, event, doc_list = entity_separator(combined_text, nlp, person, norp, fac, org, gpe, loc, product, event, doc_list)
         
+        #now loop through each list of entities we created
         for ls in [person, norp, fac, org, gpe, loc, product, event]:
            
             #tally the number of unique entities in each list and sort the resulting dictionary so we can present results in descending order, with the most frequent first.  Reconciling near matches or eliminating false positives would require too much human intervention
@@ -245,12 +252,13 @@ def main():
             #sort the resulting dictionary so we can present results in descending order, with the most frequent first
             sorted_tally = {k: v for k, v in sorted(tally.items(), key=lambda item: item[1], reverse=True)}
             
+            #if no results (i.e., empty list), we just note entity is 'N/A' and we do not create a pie-chart or full text file of entities
             if len(sorted_tally) == 0:
-                #add cell to html
                 td = etree.SubElement(tr, 'td')
                 ul = etree.SubElement(td, 'ul')
                 li = etree.SubElement(ul, 'li')
                 li.text ='N/A'
+            #if we do have results, we will write the top
             else:
                 #set graph title
                 if ls == person:
@@ -273,9 +281,11 @@ def main():
                 current_chart = os.path.join(output_files, '{}-{}.png'.format(item_barcode, graph_title))
                 current_report = os.path.join(output_files, '{}-{}.txt'.format(item_barcode, graph_title)) 
                 
-                #write results to file
+                #write full list of entities to file.  
                 with open(current_report, 'wb') as f:
                     f.write('{} Entities for {}\n\n'.format(graph_title.upper(), item_barcode).encode())
+                    
+                    #The code below adds some spaces so that this text file is better formatted
                     for k in sorted_tally.keys():
                         if len(k) < 30:
                             diff = 30 - len(k)
@@ -291,6 +301,7 @@ def main():
                             value = '\n'.join(content)
                         else:
                             value = k
+                        #if we have UnicodeEncodeError, use chardet to try and ID the encoding.
                         try:
                             f.write("{} : {}\n\n".format(value, sorted_tally[k]).encode())
                         except UnicodeEncodeError:
@@ -308,11 +319,15 @@ def main():
                 
                 ul = etree.SubElement(td, 'ul')
                 
-                #determine which results are above average; the rest are 'others'.  TOO MANY AND CHART IS UNREADABLE' WHAT IS UPPER LIMIT?
+                #determine which results are above average; the rest are 'others'.  If there are too many and chart is unreadable' what is upper limit?
                 ner_median = statistics.median(sorted(set(list(sorted_tally.values()))))
+                
+                #we are only going to include results in the 90th percentile and above on our html file.  Change variable as needed
                 percentile = 90
+                
                 ner_percentile = np.percentile(sorted(set(list(sorted_tally.values()))), percentile)
                 
+                #If we only have 10 or fewer entities, all will get included in piechart and html; if there are more, we will report the top percentiles and then lump everything else into 'other' for our pie chart and html report
                 if len(sorted_tally) <= 10:
                     results = sorted_tally
                     others = {}
@@ -320,7 +335,7 @@ def main():
                     results = {k:v for k, v in sorted_tally.items() if v > ner_median}
                     others = {k:v for k, v in sorted_tally.items() if v <= ner_median}
                 
-                #if we have too many results, we won't be able to view results; use Q3 as cut-off
+                #if we have too many results, we won't be able to view results; use 'percentile' as cut-off
                 if len(results) > 25:
                     results = {k:v for k, v in sorted_tally.items() if v > ner_percentile}
                     others = {k:v for k, v in sorted_tally.items() if v <= ner_percentile}
@@ -363,6 +378,7 @@ def main():
         # Turns each document into a bag of words.
         corpus = [words.doc2bow(doc) for doc in doc_list]
         
+        #use gensim LdaModel class to produce topics; 'num_topics' defines # of topics that will be created
         try:
             lda_model = ldamodel.LdaModel(corpus=corpus, id2word=words, num_topics=6, random_state=2, update_every=1, passes=10,  alpha='auto', per_word_topics=True)
             
