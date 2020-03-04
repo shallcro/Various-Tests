@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import glob
+import openpyxl
 import os
 import sys
 import tkinter as tk
@@ -16,9 +17,9 @@ class BdplMainApp(tk.Tk):
         self.iconbitmap(r'C:/BDPL/scripts/favicon.ico')
         self.protocol('WM_DELETE_WINDOW', lambda: close_app(self))
 
-        #variables from BDPL interface
-        self.process_type = 'BDPL Ingest'
         self.bdpl_home_dir = bdpl_home_dir
+        
+        #variables entered into BDPL interface
         self.job_type = tk.StringVar()
         self.path_to_content = tk.StringVar()
         self.item_barcode = tk.StringVar()
@@ -30,46 +31,23 @@ class BdplMainApp(tk.Tk):
         self.re_analyze = tk.BooleanVar()
         self.bdpl_failure_notification = tk.BooleanVar()
 
-        #variables from "inventory" spreadsheet
-        self.current_accession = tk.StringVar()
+        #additional GUI variables
         self.collection_title = tk.StringVar()
         self.collection_creator = tk.StringVar()
-        self.current_coll_id = tk.StringVar()
-        self.phys_loc = tk.StringVar()
         self.content_source_type = tk.StringVar()
         self.item_title = tk.StringVar()
         self.label_transcription = tk.StringVar()
         self.item_description = tk.StringVar()
         self.appraisal_notes = tk.StringVar()
-        self.assigned_dates = tk.StringVar()
         self.bdpl_instructions = tk.StringVar()
-        self.restriction_statement = tk.StringVar()
-        self.restriction_end_date = tk.StringVar()
-        self.initial_appraisal = tk.StringVar()
-
-        #variables from 'appraisal' spreadsheet
-        self.transfer_method = tk.StringVar()
-        self.migration_date = tk.StringVar()
-        #self.technician_note = tk.StringVar() #This should be defined by tk.Text widget...
-        self.migration_outcome = tk.StringVar()
-        self.extent_normal = tk.StringVar()
-        self.extent_raw = tk.IntVar()
-        self.item_file_count = tk.IntVar()
-        self.item_duplicate_count = tk.IntVar()
-        self.item_unidentified_count = tk.IntVar()
-        self.format_overview = tk.StringVar()
-        self.begin_date = tk.StringVar()
-        self.end_date = tk.StringVar()
-        self.virus_scan_results = tk.StringVar()
-        self.pii_scan_results = tk.StringVar()
 
         #create notebook to start creating app
         self.bdpl_notebook = ttk.Notebook(self)
         self.bdpl_notebook.pack(pady=10, fill=tk.BOTH, expand=True)
-        
+
         #update info on current tab when it's switched
         self.bdpl_notebook.bind('<<NotebookTabChanged>>', lambda evt: self.get_current_tab)
-        
+
         self.tabs = {}
 
         #other tabs: bag_prep, bdpl_to_mco, RipstationIngest
@@ -88,14 +66,19 @@ class BdplMainApp(tk.Tk):
         self.help_ = tk.Menu(self.menubar)
         self.menubar.add_cascade(menu=self.help_, label='Help')
         self.help_.add_command(label='Open BDPL wiki', command = lambda: webbrowser.open_new(r"https://wiki.dlib.indiana.edu/display/DIGIPRES/Born+Digital+Preservation+Lab"))
-        
-        #update info on current tab when it's switched
-        #self.process_type = self.bdpl_notebook.tab(self.bdpl_notebook.select, 'text')
-        
-        
-    def get_current_tab(self):
-        self.process_type = self.bdpl_notebook.tab(self.bdpl_notebook.select, 'text')
 
+    def get_current_tab(self):
+        return self.bdpl_notebook.tab(self.bdpl_notebook.select(), 'text')
+        
+    def check_main_vars(self):
+        if self.unit_name.get() == '':
+            return (False, '\n\nERROR: please make sure you have entered a unit ID abbreviation.')
+
+        if self.shipment_date.get() == '':
+            return (False, '\n\nERROR: please make sure you have entered a shipment date.')
+
+        #if we get through the above, then we are good to go!
+        return (True, 'Unit name and shipment date included.')
 
 class BdplIngest(tk.Frame):
     def __init__(self, parent, controller):
@@ -126,6 +109,7 @@ class BdplIngest(tk.Frame):
 
         for label_, width_, var_ in entry_fields:
             if label_ == 'Shipment date:':
+                ttk.Label(self.tab_frames_dict['batch_info_frame'], text=label_).pack(padx=(20,0), pady=10, side=tk.LEFT)
                 self.date_combobox = ttk.Combobox(self.tab_frames_dict['batch_info_frame'], width=20, textvariable=var_, postcommand = self.update_combobox)
                 self.date_combobox.pack(padx=10, pady=10, side=tk.LEFT)
             else:
@@ -145,7 +129,7 @@ class BdplIngest(tk.Frame):
         '''
         PATH FRAME: entry box to display directory path and button to launch askfiledialog
         '''
-        self.source_entry = ttk.Entry(self.tab_frames_dict['path_frame'], width=55, textvariable=self.controller.path_to_content)
+        self.source_entry = ttk.Entry(self.tab_frames_dict['path_frame'], width=75, textvariable=self.controller.path_to_content)
         self.source_entry.pack(side=tk.LEFT, padx=(20,5), pady=5)
 
         self.source_button = ttk.Button(self.tab_frames_dict['path_frame'], text='Browse', command=self.source_browse)
@@ -180,26 +164,27 @@ class BdplIngest(tk.Frame):
         BUTTON FRAME: buttons for BDPL Ingest actions
         '''
         button_id = {}
-        buttons = ['New', 'Load', 'Transfer', 'Analyze', 'Quit']
+        buttons = ['New', 'Load', 'Transfer', 'Analyze', 'Add PREMIS', 'Quit']
 
         for b in buttons:
-            button = tk.Button(self.tab_frames_dict['button_frame'], text=b, bg='light slate gray', width = 8)
-            button.pack(side=tk.LEFT, padx=20, pady=5)
+            button = tk.Button(self.tab_frames_dict['button_frame'], text=b, bg='light slate gray', width = 10)
+            button.pack(side=tk.LEFT, padx=15, pady=10)
 
             button_id[b] = button
 
         #now use button instances to assign commands
-        button_id['New'].config(command = lambda: print(self.controller.bdpl_notebook.tab(self.controller.bdpl_notebook.select(), 'text')))
+        button_id['New'].config(command = lambda: self.clear_gui(self.controller))
         button_id['Load'].config(command = lambda: self.launch_session(self.controller))
         #button_id['Transfer'].config(command = lambda: )
         #button_id['Analyze'].config(command = lambda: )
+        button_id['Add PREMIS']['state'] = 'disabled'
         button_id['Quit'].config(command = lambda: close_app(self.controller))
 
 
         '''
         BDPL NOTE FRAME: text widget to record notes on the transfer/analysis process.  Also checkbox to document item failure
         '''
-        self.bdpl_technician_note = tk.Text(self.tab_frames_dict['bdpl_note_frame'], height=3, width=50, wrap = 'word')
+        self.bdpl_technician_note = tk.Text(self.tab_frames_dict['bdpl_note_frame'], height=2, width=60, wrap = 'word')
         self.bdpl_note_scroll = ttk.Scrollbar(self.tab_frames_dict['bdpl_note_frame'], orient = tk.VERTICAL, command=self.bdpl_technician_note.yview)
 
         self.bdpl_technician_note.config(yscrollcommand=self.bdpl_note_scroll.set)
@@ -211,34 +196,20 @@ class BdplIngest(tk.Frame):
 
         self.controller.bdpl_failure_notification.set(False)
 
-        ttk.Checkbutton(self.tab_frames_dict['bdpl_note_frame'], text="Record failed transfer with note", variable=self.controller.bdpl_failure_notification).grid(row=1, column=0, padx=20, pady=(0, 10))
+        ttk.Checkbutton(self.tab_frames_dict['bdpl_note_frame'], text="Record failed transfer with note", variable=self.controller.bdpl_failure_notification).grid(row=1, column=0, columnspan=2, padx=20, pady=(0, 10))
 
         '''
         ITEM METADATA FRAME: display info about our item to BDPL technician
         '''
-        metadata_details = [('Collection title:', self.controller.collection_title), ('Creator:', self.controller.collection_creator), ('Content source:', self.controller.content_source_type)]
+        metadata_details = [('Content source:', self.controller.content_source_type), ('Collection title:', self.controller.collection_title), ('Creator:', self.controller.collection_creator), ('Item title:', self.controller.item_title), ('Label transcription', self.controller.label_transcription), ('Item description:', self.controller.item_description), ('Appraisal notes:', self.controller.appraisal_notes), ('Instructions for BDPL:', self.controller.bdpl_instructions)]
         
         c = 0
         for label_, var in metadata_details:
-            tk.Label(self.tab_frames_dict['item_metadata_frame'], text=label_, anchor='e', justify=tk.RIGHT, width=18).grid(row = c, column=0, padx=(0,5), pady=5)
-            tk.Label(self.tab_frames_dict['item_metadata_frame'], textvariable=var).grid(row = c, column=1, padx=5, pady=5)
+            l1 = tk.Label(self.tab_frames_dict['item_metadata_frame'], text=label_, anchor='e', justify=tk.RIGHT, width=18)
+            l1.grid(row = c, column=0, padx=(0,5), pady=5)
+            l2 = tk.Label(self.tab_frames_dict['item_metadata_frame'], textvariable=var, anchor='w', justify=tk.LEFT, width=60, wraplength=500)
+            l2.grid(row = c, column=1, padx=5, pady=5)
             c+=1
-        
-        metadata_text_widgets = {'appraisal_notes' : 'Appraisal notes:', 'label_transcription' : 'Label transcription:', 'bdpl_instructions' : 'Instructions for BDPL:'}
-        
-        self.metadata_text_dict = {}
-        
-        #continue to use our 'c' counter...
-        for k, v in metadata_text_widgets.items():
-            tk.Label(self.tab_frames_dict['item_metadata_frame'], text=v, anchor='e', justify=tk.RIGHT, width=18).grid(row = c, column=0, padx=(0,5), pady=5)
-            t = tk.Text(self.tab_frames_dict['item_metadata_frame'], height=3, width=50, wrap = 'word')
-            s = ttk.Scrollbar(self.tab_frames_dict['item_metadata_frame'], orient = tk.VERTICAL, command=t.yview)
-            t.config(yscrollcommand=s.set)
-            t.grid(row=c, column=1, padx=(5, 0), pady=5)
-            s.grid(row=c, column=2, padx=(0, 5), pady=(5, 0), sticky='ns')
-            c+=1
-            
-            self.metadata_text_dict[k] = t
 
     def source_browse(self):
 
@@ -264,34 +235,104 @@ class BdplIngest(tk.Frame):
                 self.controller.source_device.set('/dev/sr0')
             else:
                 self.controller.source_device.set(None)
-    
+
     def update_combobox(self):
         if self.controller.unit_name.get() == '':
             combobox_list = []
         else:
             unit_home = os.path.join(self.controller.bdpl_home_dir, self.controller.unit_name.get(), 'ingest')
             combobox_list = glob.glob1(unit_home, '*')
-        
+
         self.date_combobox['values'] = combobox_list
-        
+
     def launch_session(self, controller):
         self.controller = controller
+
+        newscreen()
         
-        #verify which process we are currently running
-        if self.controller.process_type == 'BDPL Ingest':
-            
-            #create a barcode item
+        #make sure main variables--unit_name and shipment_date--are included.  Return if either is missing
+        status, msg = self.controller.check_main_vars()
+        if not status:
+            print(msg)
+            return
+        
+        #Standard BDPL Ingest item-based workflow
+        if self.controller.get_current_tab() == 'BDPL Ingest':
+
+            #create a barcode object and a spreadsheet object
             current_item = ItemBarcode(self.controller)
-            
-            #make sure data has been entered
-            if not current_item.check_variables():
+            current_spreadsheet = Spreadsheet(self.controller)
+
+            #make sure barcode was entered
+            if current_item.item_barcode == '':
+                print('\n\nERROR: please make sure you have entered a barcode value.')
+                del current_item, current_spreadsheet
                 return
-            else:
-                print('You did it!')
+
+            #verify spreadsheet--make sure we only have 1 & that it follows naming conventions
+            status, msg = current_spreadsheet.verify_spreadsheet()
+            print(msg)
+            if not status:
+                del current_item, current_spreadsheet
+                return
+
+            #make sure spreadsheet is not open
+            if current_spreadsheet.already_open():
+                print('\n\nWARNING: {} is currently open.  Close file before continuing and/or contact digital preservation librarian if other users are involved.'.format(current_spreadsheet.spreadsheet))
+                del current_item, current_spreadsheet
+                return
+                
+            #open spreadsheet and get row # for current item (if barcode not in spreadsheet, return)
+            current_spreadsheet.open_wb()
+            status, row = current_spreadsheet.return_inventory_row()
+            if not status:
+                print('\n\nWARNING: barcode was not found in spreadsheet.  Make sure value is entered correctly and/or check spreadsheet for value.  Consult with digital preservation librarian as needed.')
+                del current_item, current_spreadsheet
+                return
+            
+            #load metadata into item object
+            current_item.load_item_metadata(current_spreadsheet, row)
+            
+            #assign variables to GUI
+            self.controller.content_source_type.set(current_item.metadata_dict['content_source_type'])
+            self.controller.collection_title.set(current_item.metadata_dict['collection_title'])
+            self.controller.collection_creator.set(current_item.metadata_dict['collection_creator'])
+            self.controller.item_title.set(current_item.metadata_dict.get('item_title', '-'))
+            self.controller.label_transcription.set(current_item.metadata_dict['label_transcription'])
+            self.controller.item_description.set(current_item.metadata_dict.get('item_description', '-'))
+            self.controller.appraisal_notes.set(current_item.metadata_dict['appraisal_notes'])
+            self.controller.bdpl_instructions.set(current_item.metadata_dict['bdpl_instructions'])
+    
+    def clear_gui(self, controller):
+        self.controller = controller
         
-        #figure out
-        else:
-            print('Protocol for other porocedures not developed yet')
+        newscreen()
+        #reset all text fields/labels        
+        self.controller.content_source_type.set('')
+        self.controller.collection_title.set('')
+        self.controller.collection_creator.set('')
+        self.controller.item_title.set('')
+        self.controller.label_transcription.set('')
+        self.controller.item_description.set('')
+        self.controller.appraisal_notes.set('')
+        self.controller.bdpl_instructions.set('')
+        self.controller.item_barcode.set('')
+        self.controller.path_to_content.set('')
+        self.controller.other_device.set('')
+        
+        #reset 5.25" floppy disk type
+        self.controller.disk525.set('N/A')
+        
+        #reset checkbuttons
+        self.controller.bdpl_failure_notification.set(False)
+        self.controller.re_analyze.set(False)
+        
+        #reset radio buttons
+        self.controller.job_type.set(None)
+        self.controller.source_device.set(None)
+        
+        #reset note text box
+        self.bdpl_technician_note.delete('1.0', tk.END)
 
 class Unit:
     def __init__(self, controller):
@@ -299,28 +340,41 @@ class Unit:
         self.unit_name = self.controller.unit_name.get()
         self.unit_home = os.path.join(self.controller.bdpl_home_dir, self.unit_name)
         self.ingest_dir = os.path.join(self.unit_home, 'ingest')
-        
+
 class Shipment(Unit):
     def __init__(self, controller):
         Unit.__init__(self, controller)
         self.controller = controller
         self.shipment_date = self.controller.shipment_date.get()
         self.ship_dir = os.path.join(self.ingest_dir, self.shipment_date)
-        self.spreadsheet = self.find_spreadsheet()
-    
-    def find_spreadsheet(self):
-        spreadsheet_ = os.path.join(self.ship_dir, '{}_{}.xlsx'.format(self.unit_name, self.shipment_date))
-        if os.path.exists(spreadsheet_):
-            return spreadsheet_
-        else:
-            return None
+        self.spreadsheet = os.path.join(self.ship_dir, '{}_{}.xlsx'.format(self.unit_name, self.shipment_date))
+
+    def verify_spreadsheet(self):
+        #check what is in the shipment dir
+        found = glob.glob(os.path.join(self.ship_dir, '*.xlsx'))
+
+        if len(found) == 0:
+            return (False, '\nWARNING: No .XLSX spreadsheet found in {}. Check {} dropbox or consult with digital preservation librarian.'.format(self.ship_dir, self.unit_name))
+
+        elif len(found) > 1:
+            if self.spreadsheet in found:
+                found.remove(self.spreadsheet)
+                return (True, '\nNOTE: In addition to the shipment manifest, {} contains the following spreadsheet(s):\n\n\t{}'.format(self.ship_dir, '\n\t'.join(found)))
+            else:
+                return (False, '\nWARNING: the following spreadsheets do not meet the BDPL naming convention of {}_{}.xlsx:\n\n\t{}'.format(self.unit_name, self.shipment_date, '\n\t'.join(found)))
+
+        elif found[0] == self.spreadsheet:
+            return (True, '\nSpreadsheet identified.')
             
+        else:
+            return (False, '\n\tWARNING: {} only contains the following spreadsheet: {}'.format(self.ship_dir, found[0]))
+
 class ItemBarcode(Shipment):
     def __init__(self, controller):
         Shipment.__init__(self, controller)
         self.controller = controller
         self.item_barcode = self.controller.item_barcode.get()
-        
+
         #set up main folders
         self.barcode_dir = os.path.join(self.ship_dir, self.item_barcode)
         self.image_dir = os.path.join(self.barcode_dir, "disk-image")
@@ -331,12 +385,12 @@ class ItemBarcode(Shipment):
         self.log_dir = os.path.join(self.metadata_dir, "logs")
         self.bulkext_dir = os.path.join(self.barcode_dir, "bulk_extractor")
         self.ffmpeg_temp_dir = os.path.join(self.temp_dir, 'ffmpeg')
-        
+
         '''SET UP FILES'''
         #assets
         self.imagefile = os.path.join(self.image_dir, '{}.dd'.format(self.item_barcode))
         self.paranoia_out = os.path.join(self.files_dir, '{}.wav'.format(self.item_barcode))
-        
+
         #files related to disk imaging with ddrescue and FC5025
         self.mapfile = os.path.join(self.temp_dir, '{}.map'.format(self.item_barcode))
         self.ddrescue_events1 = os.path.join(self.log_dir, 'ddrescue_events1.txt')
@@ -346,13 +400,13 @@ class ItemBarcode(Shipment):
         self.ddrescue_reads1 = os.path.join(self.log_dir, 'ddrescue_reads1.txt')
         self.ddrescue_reads2 = os.path.join(self.log_dir, 'ddrescue_reads2.txt')
         self.fc5025_log = os.path.join(self.log_dir, 'fcimage.log')
-        
+
         #log files
         self.virus_log = os.path.join(self.log_dir, 'viruscheck-log.txt')
         self.bulkext_log = os.path.join(self.log_dir, 'bulkext-log.txt')
         self.lsdvdout = os.path.join(self.reports_dir, "{}_lsdvd.xml".format(self.item_barcode))
         self.paranoia_log = os.path.join(self.log_dir, '{}-cdparanoia.log'.format(self.item_barcode))
-        
+
         #reports
         self.disk_info_report = os.path.join(self.reports_dir, '{}-cdrdao-diskinfo.txt'.format(self.item_barcode))
         self.paranoia_out = os.path.join(self.files_dir, '{}.wav'.format(self.item_barcode))
@@ -366,7 +420,7 @@ class ItemBarcode(Shipment):
         self.new_html = os.path.join(self.reports_dir, 'report.html')
         self.formatcsv = os.path.join(self.reports_dir, 'formats.csv')
         self.assets_target = os.path.join(self.reports_dir, 'assets')
-        
+
         #temp files
         self.siegfried_db = os.path.join(self.temp_dir, 'siegfried.sqlite')
         self.cumulative_be_report = os.path.join(self.bulkext_dir, 'cumulative.txt')
@@ -383,35 +437,205 @@ class ItemBarcode(Shipment):
             self.checksums = os.path.join(self.temp_dir, 'checksums_di.txt')
         else:
             self.checksums = os.path.join(self.temp_dir, 'checksums.txt')
-        
+
         #metadata files
         self.dfxml_output = os.path.join(self.metadata_dir, '{}-dfxml.xml'.format(self.item_barcode))
         self.premis_path = os.path.join(self.metadata_dir, '{}-premis.xml'.format(self.item_barcode))
         
-    def check_variables(self):
-        if self.unit_name == '':
-            print('\n\nError; please make sure you have entered a unit ID abbreviation.')
-            return False 
+    def load_item_metadata(self, current_spreadsheet, item_row):
         
-        if self.item_barcode == '':
-            print('\n\nError; please make sure you have entered a barcode.')
-            return False 
+        self.metadata_dict = {}
         
-        if self.shipment_date == '':
-            print('\n\nError; please make sure you have entered a shipment date.')
-            return False
-            
-        #if we get through all the above, then we are good to go!
-        return True
+        #get info from inventory sheet
+        ws_columns = current_spreadsheet.get_spreadsheet_columns(current_spreadsheet.inv_ws)
+        
+        for key in ws_columns.keys():
+            if key == 'item_barcode':
+                self.metadata_dict['item_barcode'] = self.item_barcode
+            else:
+                self.metadata_dict[key] = current_spreadsheet.inv_ws.cell(row=item_row, column=ws_columns[key]).value
 
-def close_app(window):        
+        #now check if we need to update with any info from appraisal worksheet
+        status, row = current_spreadsheet.return_appraisal_row()        
+        if status:
+            ws_columns = current_spreadsheet.get_spreadsheet_columns(current_spreadsheet.app_ws)
+        
+            for key in ws_columns.keys():
+                if key == 'item_barcode':
+                    self.metadata_dict['item_barcode'] = self.item_barcode
+                else:
+                    self.metadata_dict[key] = current_spreadsheet.app_ws.cell(row=row, column=ws_columns[key]).value
+        
+        #clean up any None values
+        for val in self.metadata_dict:
+            if self.metadata_dict[val] is None:
+                self.metadata_dict[val] = '-'
+        
+        '''
+        item_barcode
+        accession_number
+        collection_title
+        collection_id
+        collection_creator
+        phys_loc
+        content_source_type
+        label_transcription
+        appraisal_notes
+        bdpl_instructions
+        restriction_statement
+        restriction_end_date
+        initial_appraisal
+        transfer_method
+        migration_date
+        migration_outcome
+        technician_note
+        extent_normal
+        extent_raw
+        item_file_count
+        item_duplicate_count
+        item_unidentified_count
+        format_overview
+        begin_date
+        end_date
+        virus_scan_results
+        pii_scan_results
+        full_report
+        transfer_link
+        final_appraisal
+        '''
+        
+class Spreadsheet(Shipment):
+    def __init__(self, controller):
+        Shipment.__init__(self, controller)
+        
+        self.controller = controller        
+        self.barcode_target = self.controller.item_barcode.get()
+    
+    def open_wb(self):
+        self.wb = openpyxl.load_workbook(self.spreadsheet)
+        self.inv_ws = self.wb['Inventory']
+        self.app_ws = self.wb['Appraisal']
+        self.info_ws = self.wb['Basic_Transfer_Information']
+    
+    def already_open(self):
+        temp_file = os.path.join(os.path.dirname(self.spreadsheet), '~${}'.format(os.path.basename(self.spreadsheet)))
+        if os.path.isfile(temp_file):
+            return True
+        else:
+            return False
+    
+    def return_inventory_row(self):
+        #set initial Boolean value to false; change to True if barcode is found
+        found = False
+        row = ''
+        
+        #if barcode exists in spreadsheet, set variable to that row
+        for cell in self.inv_ws['A']:
+            if (cell.value is not None):
+                if self.barcode_target == str(cell.value).strip():
+                    row = cell.row
+                    found = True
+                    break
+        return found, row
+    
+    def return_appraisal_row(self):
+        #Initially set row to next open one; if barcode is found, return its existing row
+        found = False
+        row = self.app_ws.max_row+1
+
+        for cell in self.app_ws['A']:
+            if (cell.value is not None):
+                if self.barcode_target == str(cell.value).strip():
+                    row = cell.row
+                    found = True
+                    break   
+        return found, row    
+    
+    def get_spreadsheet_columns(self, ws):
+
+        spreadsheet_columns = {}
+        
+        for cell in ws[1]:
+            if not cell.value is None:
+                if 'identifier' in str(cell.value).lower():
+                    spreadsheet_columns['item_barcode'] = cell.column
+                elif 'accession' in cell.value.lower():
+                    spreadsheet_columns['accession_number'] = cell.column
+                elif 'collection title' in cell.value.lower():
+                    spreadsheet_columns['collection_title'] = cell.column
+                elif 'collection id' in cell.value.lower():
+                    spreadsheet_columns['collection_id'] = cell.column
+                elif 'creator' in cell.value.lower():
+                    spreadsheet_columns['collection_creator'] = cell.column
+                elif 'physical location' in cell.value.lower():
+                    spreadsheet_columns['phys_loc'] = cell.column
+                elif 'source type' in cell.value.lower():
+                    spreadsheet_columns['content_source_type'] = cell.column
+                elif cell.value.strip().lower() == 'title':
+                    spreadsheet_columns['item_title'] = cell.column
+                elif 'label transcription' in cell.value.lower():
+                    spreadsheet_columns['label_transcription'] = cell.column
+                elif cell.value.strip().lower() == 'description':
+                    spreadsheet_columns['item_description'] = cell.column
+                elif 'initial appraisal notes' in cell.value.lower():
+                    spreadsheet_columns['appraisal_notes'] = cell.column
+                elif 'content date range' in cell.value.lower():
+                    spreadsheet_columns['assigned_dates'] = cell.column
+                elif 'instructions' in cell.value.lower():
+                    spreadsheet_columns['bdpl_instructions'] = cell.column
+                elif 'restriction statement' in cell.value.lower():
+                    spreadsheet_columns['restriction_statement'] = cell.column
+                elif 'restriction end date' in cell.value.lower():
+                    spreadsheet_columns['restriction_end_date'] = cell.column
+                elif 'move directly to sda' in cell.value.lower():
+                    spreadsheet_columns['initial_appraisal'] = cell.column
+                elif 'transfer method' in cell.value.lower():
+                    spreadsheet_columns['transfer_method'] = cell.column
+                elif 'migration date' in cell.value.lower():
+                    spreadsheet_columns['migration_date'] = cell.column
+                elif 'migration notes' in cell.value.lower():
+                    spreadsheet_columns['technician_note'] = cell.column
+                elif 'migration outcome' in cell.value.lower():
+                    spreadsheet_columns['migration_outcome'] = cell.column
+                elif 'extent (normalized)' in cell.value.lower():
+                    spreadsheet_columns['extent_normal'] = cell.column
+                elif 'extent (raw)' in cell.value.lower():
+                    spreadsheet_columns['extent_raw'] = cell.column
+                elif 'no. of files' in cell.value.lower():
+                    spreadsheet_columns['item_file_count'] = cell.column
+                elif 'no. of duplicate files' in cell.value.lower():
+                    spreadsheet_columns['item_duplicate_count'] = cell.column
+                elif 'no. of unidentified files' in cell.value.lower():
+                    spreadsheet_columns['item_unidentified_count'] = cell.column
+                elif 'file formats' in cell.value.lower():
+                    spreadsheet_columns['format_overview'] = cell.column
+                elif 'begin date' in cell.value.lower():
+                    spreadsheet_columns['begin_date'] = cell.column
+                elif 'end date' in cell.value.lower():
+                    spreadsheet_columns['end_date'] = cell.column
+                elif 'virus status' in cell.value.lower():
+                    spreadsheet_columns['virus_scan_results'] = cell.column
+                elif 'pii status' in cell.value.lower():
+                    spreadsheet_columns['pii_scan_results'] = cell.column
+                elif 'full report' in cell.value.lower():
+                    spreadsheet_columns['full_report'] = cell.column
+                elif 'link to transfer' in cell.value.lower():
+                    spreadsheet_columns['transfer_link'] = cell.column
+                elif 'appraisal results' in cell.value.lower():
+                    spreadsheet_columns['final_appraisal'] = cell.column
+                elif 'job type' in cell.value.lower():
+                    spreadsheet_columns['jobType'] = cell.column
+        
+        return spreadsheet_columns
+
+def close_app(window):
     print('BYE!')
     window.destroy()
     sys.exit(0)
 
 def newscreen():
     os.system('cls')
-    
+
     fname = "C:/BDPL/scripts/bdpl.txt"
     if os.path.exists(fname):
         with open(fname, 'r') as fin:
@@ -423,10 +647,10 @@ def newscreen():
 def main():
     #clear CMD.EXE screen and print logo
     newscreen()
-    
+
     #assign path for 'home directory'.  Change if needed...
-    bdpl_home_dir = 'Z:\\'
-    
+    bdpl_home_dir = 'Z:/'
+
     #create and launch our main app.
     bdpl = BdplMainApp(bdpl_home_dir)
     bdpl.mainloop()
