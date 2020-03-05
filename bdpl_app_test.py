@@ -2,6 +2,7 @@
 import glob
 import openpyxl
 import os
+import pickle
 import sys
 import tkinter as tk
 from tkinter import ttk
@@ -30,8 +31,10 @@ class BdplMainApp(tk.Tk):
         self.disk525 = tk.StringVar()
         self.re_analyze = tk.BooleanVar()
         self.bdpl_failure_notification = tk.BooleanVar()
+        self.media_attached = tk.BooleanVar()
+        self.has_transfer_list = tk.BooleanVar()
 
-        #additional GUI variables
+        #GUI metadata variables
         self.collection_title = tk.StringVar()
         self.collection_creator = tk.StringVar()
         self.content_source_type = tk.StringVar()
@@ -76,7 +79,12 @@ class BdplMainApp(tk.Tk):
 
         if self.shipment_date.get() == '':
             return (False, '\n\nERROR: please make sure you have entered a shipment date.')
-
+        
+        #check barcode value, too, if we're using standard BDPL Ingest tab
+        if self.get_current_tab() == 'BDPL Ingest':
+            if self.item_barcode.get() == '':
+                return (False, '\n\nERROR: please make sure you have entered a barcode value.')
+                
         #if we get through the above, then we are good to go!
         return (True, 'Unit name and shipment date included.')
 
@@ -129,16 +137,19 @@ class BdplIngest(tk.Frame):
         '''
         PATH FRAME: entry box to display directory path and button to launch askfiledialog
         '''
-        self.source_entry = ttk.Entry(self.tab_frames_dict['path_frame'], width=75, textvariable=self.controller.path_to_content)
+        self.source_entry = ttk.Entry(self.tab_frames_dict['path_frame'], width=60, textvariable=self.controller.path_to_content)
         self.source_entry.pack(side=tk.LEFT, padx=(20,5), pady=5)
 
         self.source_button = ttk.Button(self.tab_frames_dict['path_frame'], text='Browse', command=self.source_browse)
         self.source_button.pack(side=tk.LEFT, padx=(5,20), pady=5)
+        
+        self.controller.has_transfer_list.set(False)
+        ttk.Checkbutton(self.tab_frames_dict['path_frame'], text='Transfer list?', variable=self.controller.has_transfer_list).pack(side=tk.LEFT, padx=10, pady=5)
 
         '''
         SOURCE DEVICE FRAME: radio buttons and other widgets to record information on the source media and/or device
         '''
-        devices = [('CD/DVD', '/dev/sr0'), ('3.5"', '/dev/fd0'), ('5.25"',  '5.25'), ('5.25_menu', 'menu'), ('Zip', 'Zip'), ('Other', 'Other'), ('Other_device', 'Other device name')]
+        devices = [('CD/DVD', '/dev/sr0'), ('3.5"', '/dev/fd0'), ('5.25"',  '5.25'), ('5.25_menu', 'menu'), ('Zip', 'Zip'), ('Other', 'Other'), ('Other_device', 'Other device name'), ('Attached?', 'Is media attached?')]
 
         disk_type_options = ['N/A', 'Apple DOS 3.3 (16-sector)', 'Apple DOS 3.2 (13-sector)', 'Apple ProDOS', 'Commodore 1541', 'TI-99/4A 90k', 'TI-99/4A 180k', 'TI-99/4A 360k', 'Atari 810', 'MS-DOS 1200k', 'MS-DOS 360k', 'North Star MDS-A-D 175k', 'North Star MDS-A-D 350k', 'Kaypro 2 CP/M 2.2', 'Kaypro 4 CP/M 2.2', 'CalComp Vistagraphics 4500', 'PMC MicroMate', 'Tandy Color Computer Disk BASIC', 'Motorola VersaDOS']
 
@@ -156,10 +167,14 @@ class BdplIngest(tk.Frame):
                 ttk.Label(self.tab_frames_dict['source_device_frame'], text="(& name)").pack(side=tk.LEFT, pady=5)
                 self.other_deviceEntry = tk.Entry(self.tab_frames_dict['source_device_frame'], width=5, textvariable=self.controller.other_device)
                 self.other_deviceEntry.pack(side=tk.LEFT, padx=(0,10), pady=5)
-
+            
+            elif k == 'Attached?':
+                self.controller.media_attached.set(False)
+                ttk.Checkbutton(self.tab_frames_dict['source_device_frame'], text=k, variable=self.controller.media_attached).pack(side=tk.LEFT, padx=10, pady=5)
             #otherwise, create radio buttons
             else:
                 ttk.Radiobutton(self.tab_frames_dict['source_device_frame'], text=k, value=v, variable=self.controller.source_device).pack(side=tk.LEFT, padx=10, pady=5)
+                
         '''
         BUTTON FRAME: buttons for BDPL Ingest actions
         '''
@@ -173,7 +188,7 @@ class BdplIngest(tk.Frame):
             button_id[b] = button
 
         #now use button instances to assign commands
-        button_id['New'].config(command = lambda: self.clear_gui(self.controller))
+        button_id['New'].config(command = self.clear_gui)
         button_id['Load'].config(command = lambda: self.launch_session(self.controller))
         #button_id['Transfer'].config(command = lambda: )
         #button_id['Analyze'].config(command = lambda: )
@@ -250,7 +265,7 @@ class BdplIngest(tk.Frame):
 
         newscreen()
         
-        #make sure main variables--unit_name and shipment_date--are included.  Return if either is missing
+        #make sure main variables--unit_name, shipment_date, and barcode--are included.  Return if either is missing
         status, msg = self.controller.check_main_vars()
         if not status:
             print(msg)
@@ -260,51 +275,71 @@ class BdplIngest(tk.Frame):
         if self.controller.get_current_tab() == 'BDPL Ingest':
 
             #create a barcode object and a spreadsheet object
-            current_item = ItemBarcode(self.controller)
+            current_barcode_item = ItemBarcode(self.controller)
             current_spreadsheet = Spreadsheet(self.controller)
-
-            #make sure barcode was entered
-            if current_item.item_barcode == '':
-                print('\n\nERROR: please make sure you have entered a barcode value.')
-                del current_item, current_spreadsheet
-                return
 
             #verify spreadsheet--make sure we only have 1 & that it follows naming conventions
             status, msg = current_spreadsheet.verify_spreadsheet()
             print(msg)
             if not status:
-                del current_item, current_spreadsheet
+                del current_barcode_item, current_spreadsheet
                 return
 
             #make sure spreadsheet is not open
             if current_spreadsheet.already_open():
                 print('\n\nWARNING: {} is currently open.  Close file before continuing and/or contact digital preservation librarian if other users are involved.'.format(current_spreadsheet.spreadsheet))
-                del current_item, current_spreadsheet
+                del current_barcode_item, current_spreadsheet
                 return
                 
-            #open spreadsheet and get row # for current item (if barcode not in spreadsheet, return)
+            #open spreadsheet and make sure current item exists in spreadsheet; if not, return
             current_spreadsheet.open_wb()
             status, row = current_spreadsheet.return_inventory_row()
             if not status:
                 print('\n\nWARNING: barcode was not found in spreadsheet.  Make sure value is entered correctly and/or check spreadsheet for value.  Consult with digital preservation librarian as needed.')
-                del current_item, current_spreadsheet
+                del current_barcode_item, current_spreadsheet
                 return
             
             #load metadata into item object
-            current_item.load_item_metadata(current_spreadsheet, row)
+            current_barcode_item.load_item_metadata(current_spreadsheet, row)
             
             #assign variables to GUI
-            self.controller.content_source_type.set(current_item.metadata_dict['content_source_type'])
-            self.controller.collection_title.set(current_item.metadata_dict['collection_title'])
-            self.controller.collection_creator.set(current_item.metadata_dict['collection_creator'])
-            self.controller.item_title.set(current_item.metadata_dict.get('item_title', '-'))
-            self.controller.label_transcription.set(current_item.metadata_dict['label_transcription'])
-            self.controller.item_description.set(current_item.metadata_dict.get('item_description', '-'))
-            self.controller.appraisal_notes.set(current_item.metadata_dict['appraisal_notes'])
-            self.controller.bdpl_instructions.set(current_item.metadata_dict['bdpl_instructions'])
+            self.controller.content_source_type.set(current_barcode_item.metadata_dict['content_source_type'])
+            self.controller.collection_title.set(current_barcode_item.metadata_dict['collection_title'])
+            self.controller.collection_creator.set(current_barcode_item.metadata_dict['collection_creator'])
+            self.controller.item_title.set(current_barcode_item.metadata_dict.get('item_title', '-'))
+            self.controller.label_transcription.set(current_barcode_item.metadata_dict['label_transcription'])
+            self.controller.item_description.set(current_barcode_item.metadata_dict.get('item_description', '-'))
+            self.controller.appraisal_notes.set(current_barcode_item.metadata_dict['appraisal_notes'])
+            self.controller.bdpl_instructions.set(current_barcode_item.metadata_dict['bdpl_instructions'])
+            
+            #create folders
+            current_barcode_item.create_folders()
+            
+            print('\n\nRecord loaded successfully; ready for next operation.')
     
-    def clear_gui(self, controller):
+    def launch_transfer(self, controller):
         self.controller = controller
+        
+        #make sure main variables--unit_name, shipment_date, and barcode--are included.  Return if either is missing
+        status, msg = self.controller.check_main_vars()
+        if not status:
+            print(msg)
+            return
+        
+        #create a barcode object and job object
+        current_barcode_item = ItemBarcode(self.controller)
+        current_job = IngestJob(self.controller, current_barcode_item)
+        
+        if current_job.job_type == 'Copy_only':
+            pass
+        
+        #make sure we have already initiated a session for this barcode
+        if not os.path.exists(current_barcode_item.barcode_dir):
+            print('\n\nWARNING: load record before proceeding')
+            return
+    
+    def clear_gui(self):
+        #self.controller = controller
         
         newscreen()
         #reset all text fields/labels        
@@ -326,6 +361,8 @@ class BdplIngest(tk.Frame):
         #reset checkbuttons
         self.controller.bdpl_failure_notification.set(False)
         self.controller.re_analyze.set(False)
+        self.controller.media_attached.set(False)
+        self.controller.has_transfer_list.set(False)
         
         #reset radio buttons
         self.controller.job_type.set(None)
@@ -340,6 +377,7 @@ class Unit:
         self.unit_name = self.controller.unit_name.get()
         self.unit_home = os.path.join(self.controller.bdpl_home_dir, self.unit_name)
         self.ingest_dir = os.path.join(self.unit_home, 'ingest')
+        self.media_image_dir = os.path.join(self.controller.bdpl_home_dir, 'media-images', self.unit_name)
 
 class Shipment(Unit):
     def __init__(self, controller):
@@ -374,6 +412,10 @@ class ItemBarcode(Shipment):
         Shipment.__init__(self, controller)
         self.controller = controller
         self.item_barcode = self.controller.item_barcode.get()
+        
+        self.path_to_content = self.controller.path_to_content.get().replace('/', '\\')   
+        if self.controller.has_transfer_list.get():
+            self.path_to_content = os.path.join(self.path_to_content, '{}.txt'.format(self.item_barcode))
 
         #set up main folders
         self.barcode_dir = os.path.join(self.ship_dir, self.item_barcode)
@@ -384,7 +426,8 @@ class ItemBarcode(Shipment):
         self.reports_dir = os.path.join(self.metadata_dir, "reports")
         self.log_dir = os.path.join(self.metadata_dir, "logs")
         self.bulkext_dir = os.path.join(self.barcode_dir, "bulk_extractor")
-        self.ffmpeg_temp_dir = os.path.join(self.temp_dir, 'ffmpeg')
+       
+        self.folders = [self.barcode_dir, self.image_dir, self.files_dir, self.metadata_dir, self.temp_dir, self.reports_dir, self.log_dir, self.bulkext_dir, self.media_image_dir]
 
         '''SET UP FILES'''
         #assets
@@ -422,6 +465,7 @@ class ItemBarcode(Shipment):
         self.assets_target = os.path.join(self.reports_dir, 'assets')
 
         #temp files
+        self.ffmpeg_temp_dir = os.path.join(self.temp_dir, 'ffmpeg')
         self.siegfried_db = os.path.join(self.temp_dir, 'siegfried.sqlite')
         self.cumulative_be_report = os.path.join(self.bulkext_dir, 'cumulative.txt')
         self.lsdvd_temp = os.path.join(self.temp_dir, 'lsdvd.txt')
@@ -444,16 +488,18 @@ class ItemBarcode(Shipment):
         
     def load_item_metadata(self, current_spreadsheet, item_row):
         
-        self.metadata_dict = {}
+        self.metadata_dict = self.pickle_load('dict', 'metadata_dict')
         
-        #get info from inventory sheet
-        ws_columns = current_spreadsheet.get_spreadsheet_columns(current_spreadsheet.inv_ws)
-        
-        for key in ws_columns.keys():
-            if key == 'item_barcode':
-                self.metadata_dict['item_barcode'] = self.item_barcode
-            else:
-                self.metadata_dict[key] = current_spreadsheet.inv_ws.cell(row=item_row, column=ws_columns[key]).value
+        #if dict is empty, get info from Inventory spreadsheet
+        if len(self.metadata_dict) == 0:
+            #get info from inventory sheet
+            ws_columns = current_spreadsheet.get_spreadsheet_columns(current_spreadsheet.inv_ws)
+            
+            for key in ws_columns.keys():
+                if key == 'item_barcode':
+                    self.metadata_dict['item_barcode'] = self.item_barcode
+                else:
+                    self.metadata_dict[key] = current_spreadsheet.inv_ws.cell(row=item_row, column=ws_columns[key]).value
 
         #now check if we need to update with any info from appraisal worksheet
         status, row = current_spreadsheet.return_appraisal_row()        
@@ -471,6 +517,97 @@ class ItemBarcode(Shipment):
             if self.metadata_dict[val] is None:
                 self.metadata_dict[val] = '-'
         
+        #save a copy so we can access later
+        self.pickle_dump('metadata_dict', self.metadata_dict)
+        
+    def create_folders(self):
+        #folders-created file will help us check for completion
+        folders_created = os.path.join(self.temp_dir, 'folders_created.txt')
+    
+        #if file doesn't exist, create folders
+        if not os.path.exists(folders_created):
+            for target in self.folders:
+                try:
+                    os.makedirs(target)
+                except OSError as exception:
+                    if exception.errno != errno.EEXIST:
+                        raise
+            
+            #create file at end of loop
+            open(folders_created, 'a').close()
+            
+    def pickle_load(self, array_type, array_name):
+        
+        temp_file = os.path.join(self.temp_dir, '{}.txt'.format(array_name))
+        
+        if array_type == 'ls':
+            temp_array = []
+        elif array_type == 'dict':
+            temp_array = {}
+        
+        #make sure there's something in the file
+        if os.path.exists(temp_file) and os.path.getsize(temp_file) > 0:
+            with open(temp_file, 'rb') as file:
+                temp_array = pickle.load(file)
+                        
+        return temp_array
+
+    def pickle_dump(self, array_name, array_instance):
+        
+        temp_file = os.path.join(self.temp_dir, '{}.txt'.format(array_name))
+         
+        if not os.path.exists(self.temp_dir):
+            os.makedirs(self.temp_dir)
+            
+        with open(temp_file, 'wb') as file:
+            pickle.dump(array_instance, file)
+    
+    def store_premis(self):
+        '''
+        THIS NEEDS HELP!!!
+        '''
+        if array_name == "premis_list":
+            
+            premis_path = os.path.join(metadata, '%s-premis.xml' % item_barcode)
+            premis_xml_included = os.path.join(temp_dir, 'premis_xml_included.txt')
+            
+            #for our list of premis events, we want to pull in information that may have already been written to premis xml
+            if os.path.exists(premis_path):
+                
+                #check to see if operation has already been completed (we'll write an empty file once we've done so)
+                if not os.path.exists(premis_xml_included):
+                    PREMIS_NAMESPACE = "http://www.loc.gov/premis/v3"
+                    NSMAP = {'premis' : PREMIS_NAMESPACE, "xsi": "http://www.w3.org/2001/XMLSchema-instance"}
+                    parser = etree.XMLParser(remove_blank_text=True)
+                    tree = etree.parse(premis_path, parser=parser)
+                    root = tree.getroot()
+                    events = tree.xpath("//premis:event", namespaces=NSMAP)
+                    
+                    for e in events:
+                        temp_dict = {}
+                        temp_dict['eventType'] = e.findtext('./premis:eventType', namespaces=NSMAP)
+                        temp_dict['eventOutcomeDetail'] = e.findtext('./premis:eventOutcomeInformation/premis:eventOutcome', namespaces=NSMAP)
+                        temp_dict['timestamp'] = e.findtext('./premis:eventDateTime', namespaces=NSMAP)
+                        temp_dict['eventDetailInfo'] = e.findall('./premis:eventDetailInformation/premis:eventDetail', namespaces=NSMAP)[0].text
+                        temp_dict['eventDetailInfo_additional'] = e.findall('./premis:eventDetailInformation/premis:eventDetail', namespaces=NSMAP)[1].text
+                        temp_dict['linkingAgentIDvalue'] = e.findall('./premis:linkingAgentIdentifier/premis:linkingAgentIdentifierValue', namespaces=NSMAP)[1].text
+                        temp_premis.append(temp_dict)
+                        
+                    #now create our premis_xml_included.txt file so we don't go through this again.
+                    open(premis_xml_included, 'a').close()
+                    
+                    #if anything was added from our premix.xml file, 
+        if len(temp_premis) > 0:
+            for d in temp_premis:
+                if not d in temp_array:
+                    temp_array.append(d)
+            
+            #now sort based on ['timestamp']
+            temp_array.sort(key=lambda x:x['timestamp'])
+                
+        return temp_array
+        
+    #def launch_transfer(self, controller):
         '''
         item_barcode
         accession_number
@@ -624,9 +761,26 @@ class Spreadsheet(Shipment):
                 elif 'appraisal results' in cell.value.lower():
                     spreadsheet_columns['final_appraisal'] = cell.column
                 elif 'job type' in cell.value.lower():
-                    spreadsheet_columns['jobType'] = cell.column
+                    spreadsheet_columns['job_type'] = cell.column
         
         return spreadsheet_columns
+        
+class IngestJob:
+    def __init__(self, controller, current_barcode_item):
+        self.controller = controller
+        self.job_type = self.controller.job_type.get()
+        
+        if self.job_type == 'Copy_only':
+        
+            #make sure correct slashes are used in path
+            self.path_to_content = self.controller.path_to_content.get().replace('/', '\\')
+            
+            if self.controller.has_transfer_list.get():
+                self.path_to_content = os.path.join(self.path_to_content, '{}.txt'.format(current_barcode_item.item_barcode))
+            
+        
+
+        
 
 def close_app(window):
     print('BYE!')
