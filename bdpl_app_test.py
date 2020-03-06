@@ -28,11 +28,10 @@ class BdplMainApp(tk.Tk):
         self.shipment_date = tk.StringVar()
         self.source_device = tk.StringVar()
         self.other_device = tk.StringVar()
-        self.disk525 = tk.StringVar()
+        self.disk_525_type = tk.StringVar()
         self.re_analyze = tk.BooleanVar()
         self.bdpl_failure_notification = tk.BooleanVar()
         self.media_attached = tk.BooleanVar()
-        self.has_transfer_list = tk.BooleanVar()
 
         #GUI metadata variables
         self.collection_title = tk.StringVar()
@@ -142,9 +141,6 @@ class BdplIngest(tk.Frame):
 
         self.source_button = ttk.Button(self.tab_frames_dict['path_frame'], text='Browse', command=self.source_browse)
         self.source_button.pack(side=tk.LEFT, padx=(5,20), pady=5)
-        
-        self.controller.has_transfer_list.set(False)
-        ttk.Checkbutton(self.tab_frames_dict['path_frame'], text='Transfer list?', variable=self.controller.has_transfer_list).pack(side=tk.LEFT, padx=10, pady=5)
 
         '''
         SOURCE DEVICE FRAME: radio buttons and other widgets to record information on the source media and/or device
@@ -157,8 +153,8 @@ class BdplIngest(tk.Frame):
         for k, v in devices:
             #Insert an option menu for 5.25" floppy disk types
             if k == '5.25_menu':
-                self.controller.disk525.set('N/A')
-                self.disk_menu = tk.OptionMenu(self.tab_frames_dict['source_device_frame'], self.controller.disk525, *disk_type_options)
+                self.controller.disk_525_type.set('N/A')
+                self.disk_menu = tk.OptionMenu(self.tab_frames_dict['source_device_frame'], self.controller.disk_525_type, *disk_type_options)
                 self.disk_menu.pack(side=tk.LEFT, padx=10, pady=5)
 
             #add an entry field to add POSIX name for 'other' device
@@ -329,14 +325,28 @@ class BdplIngest(tk.Frame):
         #create a barcode object and job object
         current_barcode_item = ItemBarcode(self.controller)
         current_job = IngestJob(self.controller, current_barcode_item)
-        
-        if current_job.job_type == 'Copy_only':
-            pass
-        
+
         #make sure we have already initiated a session for this barcode
         if not os.path.exists(current_barcode_item.barcode_dir):
             print('\n\nWARNING: load record before proceeding')
             return
+        
+        #Copy only job
+        if current_job.job_type == 'Copy_only':
+            current_job.secure_copy(current_job.path_to_content, current_barcode_item)
+        
+        #Disk image job type
+        elif current_job.job_type == 'Disk_image':
+            
+            if current_job.source_device == '5.25':
+                if current_job.disk_525_type == 'N/A':
+                    print('\n\nWARNING: select the appropriate 5.25" floppy disk type from the drop down menu.')
+                    return
+                else:
+                    current_job.fc5025_image(current_barcode_item)
+            
+            else:
+                current_job.ddrescue_image
     
     def clear_gui(self):
         #self.controller = controller
@@ -356,13 +366,12 @@ class BdplIngest(tk.Frame):
         self.controller.other_device.set('')
         
         #reset 5.25" floppy disk type
-        self.controller.disk525.set('N/A')
+        self.controller.disk_525_type.set('N/A')
         
         #reset checkbuttons
         self.controller.bdpl_failure_notification.set(False)
         self.controller.re_analyze.set(False)
         self.controller.media_attached.set(False)
-        self.controller.has_transfer_list.set(False)
         
         #reset radio buttons
         self.controller.job_type.set(None)
@@ -412,10 +421,6 @@ class ItemBarcode(Shipment):
         Shipment.__init__(self, controller)
         self.controller = controller
         self.item_barcode = self.controller.item_barcode.get()
-        
-        self.path_to_content = self.controller.path_to_content.get().replace('/', '\\')   
-        if self.controller.has_transfer_list.get():
-            self.path_to_content = os.path.join(self.path_to_content, '{}.txt'.format(self.item_barcode))
 
         #set up main folders
         self.barcode_dir = os.path.join(self.ship_dir, self.item_barcode)
@@ -435,13 +440,7 @@ class ItemBarcode(Shipment):
         self.paranoia_out = os.path.join(self.files_dir, '{}.wav'.format(self.item_barcode))
 
         #files related to disk imaging with ddrescue and FC5025
-        self.mapfile = os.path.join(self.temp_dir, '{}.map'.format(self.item_barcode))
-        self.ddrescue_events1 = os.path.join(self.log_dir, 'ddrescue_events1.txt')
-        self.ddrescue_events2 = os.path.join(self.log_dir, 'ddrescue_events2.txt')
-        self.ddrescue_rates1 = os.path.join(self.log_dir, 'ddrescue_rates1.txt')
-        self.ddrescue_rates2 = os.path.join(self.log_dir, 'ddrescue_rates2.txt')
-        self.ddrescue_reads1 = os.path.join(self.log_dir, 'ddrescue_reads1.txt')
-        self.ddrescue_reads2 = os.path.join(self.log_dir, 'ddrescue_reads2.txt')
+        self.mapfile = os.path.join(self.log_dir, '{}.map'.format(self.item_barcode))
         self.fc5025_log = os.path.join(self.log_dir, 'fcimage.log')
 
         #log files
@@ -488,7 +487,7 @@ class ItemBarcode(Shipment):
         
     def load_item_metadata(self, current_spreadsheet, item_row):
         
-        self.metadata_dict = self.pickle_load('dict', 'metadata_dict')
+        self.metadata_dict = pickle_load(self, 'dict', 'metadata_dict')
         
         #if dict is empty, get info from Inventory spreadsheet
         if len(self.metadata_dict) == 0:
@@ -518,7 +517,7 @@ class ItemBarcode(Shipment):
                 self.metadata_dict[val] = '-'
         
         #save a copy so we can access later
-        self.pickle_dump('metadata_dict', self.metadata_dict)
+        pickle_dump(self, 'metadata_dict', self.metadata_dict)
         
     def create_folders(self):
         #folders-created file will help us check for completion
@@ -535,112 +534,7 @@ class ItemBarcode(Shipment):
             
             #create file at end of loop
             open(folders_created, 'a').close()
-            
-    def pickle_load(self, array_type, array_name):
-        
-        temp_file = os.path.join(self.temp_dir, '{}.txt'.format(array_name))
-        
-        if array_type == 'ls':
-            temp_array = []
-        elif array_type == 'dict':
-            temp_array = {}
-        
-        #make sure there's something in the file
-        if os.path.exists(temp_file) and os.path.getsize(temp_file) > 0:
-            with open(temp_file, 'rb') as file:
-                temp_array = pickle.load(file)
-                        
-        return temp_array
-
-    def pickle_dump(self, array_name, array_instance):
-        
-        temp_file = os.path.join(self.temp_dir, '{}.txt'.format(array_name))
-         
-        if not os.path.exists(self.temp_dir):
-            os.makedirs(self.temp_dir)
-            
-        with open(temp_file, 'wb') as file:
-            pickle.dump(array_instance, file)
-    
-    def store_premis(self):
-        '''
-        THIS NEEDS HELP!!!
-        '''
-        if array_name == "premis_list":
-            
-            premis_path = os.path.join(metadata, '%s-premis.xml' % item_barcode)
-            premis_xml_included = os.path.join(temp_dir, 'premis_xml_included.txt')
-            
-            #for our list of premis events, we want to pull in information that may have already been written to premis xml
-            if os.path.exists(premis_path):
-                
-                #check to see if operation has already been completed (we'll write an empty file once we've done so)
-                if not os.path.exists(premis_xml_included):
-                    PREMIS_NAMESPACE = "http://www.loc.gov/premis/v3"
-                    NSMAP = {'premis' : PREMIS_NAMESPACE, "xsi": "http://www.w3.org/2001/XMLSchema-instance"}
-                    parser = etree.XMLParser(remove_blank_text=True)
-                    tree = etree.parse(premis_path, parser=parser)
-                    root = tree.getroot()
-                    events = tree.xpath("//premis:event", namespaces=NSMAP)
-                    
-                    for e in events:
-                        temp_dict = {}
-                        temp_dict['eventType'] = e.findtext('./premis:eventType', namespaces=NSMAP)
-                        temp_dict['eventOutcomeDetail'] = e.findtext('./premis:eventOutcomeInformation/premis:eventOutcome', namespaces=NSMAP)
-                        temp_dict['timestamp'] = e.findtext('./premis:eventDateTime', namespaces=NSMAP)
-                        temp_dict['eventDetailInfo'] = e.findall('./premis:eventDetailInformation/premis:eventDetail', namespaces=NSMAP)[0].text
-                        temp_dict['eventDetailInfo_additional'] = e.findall('./premis:eventDetailInformation/premis:eventDetail', namespaces=NSMAP)[1].text
-                        temp_dict['linkingAgentIDvalue'] = e.findall('./premis:linkingAgentIdentifier/premis:linkingAgentIdentifierValue', namespaces=NSMAP)[1].text
-                        temp_premis.append(temp_dict)
-                        
-                    #now create our premis_xml_included.txt file so we don't go through this again.
-                    open(premis_xml_included, 'a').close()
-                    
-                    #if anything was added from our premix.xml file, 
-        if len(temp_premis) > 0:
-            for d in temp_premis:
-                if not d in temp_array:
-                    temp_array.append(d)
-            
-            #now sort based on ['timestamp']
-            temp_array.sort(key=lambda x:x['timestamp'])
-                
-        return temp_array
-        
-    #def launch_transfer(self, controller):
-        '''
-        item_barcode
-        accession_number
-        collection_title
-        collection_id
-        collection_creator
-        phys_loc
-        content_source_type
-        label_transcription
-        appraisal_notes
-        bdpl_instructions
-        restriction_statement
-        restriction_end_date
-        initial_appraisal
-        transfer_method
-        migration_date
-        migration_outcome
-        technician_note
-        extent_normal
-        extent_raw
-        item_file_count
-        item_duplicate_count
-        item_unidentified_count
-        format_overview
-        begin_date
-        end_date
-        virus_scan_results
-        pii_scan_results
-        full_report
-        transfer_link
-        final_appraisal
-        '''
-        
+ 
 class Spreadsheet(Shipment):
     def __init__(self, controller):
         Shipment.__init__(self, controller)
@@ -769,18 +663,222 @@ class IngestJob:
     def __init__(self, controller, current_barcode_item):
         self.controller = controller
         self.job_type = self.controller.job_type.get()
-        
-        if self.job_type == 'Copy_only':
-        
-            #make sure correct slashes are used in path
+        self.process_type = self.controller.get_current_tab()
+        if 'bdpl_transfer_list' in self.path_to_content:
+            self.path_to_content = os.path.join(self.path_to_content.replace('/', '\\'), '{}.txt'.format(self.item_barcode))
+        else:
             self.path_to_content = self.controller.path_to_content.get().replace('/', '\\')
-            
-            if self.controller.has_transfer_list.get():
-                self.path_to_content = os.path.join(self.path_to_content, '{}.txt'.format(current_barcode_item.item_barcode))
-            
+        self.source_device = self.controller.source_device.get()
+        self.other_device = self.controller.other_device.get()
+        self.disk_525_type = self.controller.disk_525_type.get()
+        self.re_analyze = self.controller.re_analyze.get()
+        self.bdpl_failure_notification = self.controller.bdpl_failure_notification.get()
+        self.media_attached = self.controller.media_attached.get()
         
+        self.disk_type_options = { 'Apple DOS 3.3 (16-sector)' : 'apple33', 'Apple DOS 3.2 (13-sector)' : 'apple32', 'Apple ProDOS' : 'applepro', 'Commodore 1541' : 'c1541', 'TI-99/4A 90k' : 'ti99', 'TI-99/4A 180k' : 'ti99ds180', 'TI-99/4A 360k' : 'ti99ds360', 'Atari 810' : 'atari810', 'MS-DOS 1200k' : 'msdos12', 'MS-DOS 360k' : 'msdos360', 'North Star MDS-A-D 175k' : 'mdsad', 'North Star MDS-A-D 350k' : 'mdsad350', 'Kaypro 2 CP/M 2.2' : 'kaypro2', 'Kaypro 4 CP/M 2.2' : 'kaypro4', 'CalComp Vistagraphics 4500' : 'vg4500', 'PMC MicroMate' : 'pmc', 'Tandy Color Computer Disk BASIC' : 'coco', 'Motorola VersaDOS' : 'versa' }
+        
+    def secure_copy(self, content_source, current_barcode_item):
+        
+        if not os.path.exists(content_source):
+            print('\n\nFile source does not exist: "{}"\n\nPlease verify the correct source has been identified.'.format(content_source))
+            return
 
+        #function takes the file source and destination as well as  a specific premis event to be used in documenting action
+        print('\n\nFILE REPLICATION: TERACOPY\n\n\tSOURCE: %s \n\tDESTINATION: %s' % (content_source, current_barcode_item.files_dir))
         
+        #set variables for premis
+        timestamp = str(datetime.datetime.now())             
+        migrate_ver = "TeraCopy v3.26"
+        
+        #set variables for copy operation; note that if we are using a file list, TERACOPY requires a '*' before the source. 
+        if os.path.isfile(content_source):
+            copycmd = 'TERACOPY COPY *"%s" %s /SkipAll /CLOSE' % (content_source, current_barcode_item.files_dir)
+        else:
+            copycmd = 'TERACOPY COPY "%s" %s /SkipAll /CLOSE' % (content_source, current_barcode_item.files_dir)
+        
+        try:
+            exitcode = subprocess.call(copycmd, shell=True, text=True)
+        except subprocess.CalledProcessError as e:
+            print('\n\tFile replication failed:\n\n\t%s' % e)
+            return
+                
+        #need to find Teracopy SQLITE db and export list of copied files to csv log file
+        list_of_files = glob.glob(os.path.join(os.path.expandvars('C:\\Users\%USERNAME%\AppData\Roaming\TeraCopy\History'), '*'))
+        tera_db = max(list_of_files, key=os.path.getctime)
+        
+        conn = sqlite3.connect(tera_db)
+        conn.text_factory = str
+        cur = conn.cursor()
+        results = cur.execute("SELECT * from Files")
+        
+        tera_log = os.path.join(current_barcode_item.log_dir, 'teracopy_log.csv')
+        with open(tera_log, 'w', encoding='utf8') as output:
+            writer = csv.writer(output, lineterminator='\n')
+            header = ['Source', 'Offset', 'State', 'Size', 'Attributes', 'IsFolder', 'Creation', 'Access', 'Write', 'SourceCRC', 'TargetCRC', 'TargetName', 'Message', 'Marked', 'Hidden']
+            writer.writerow(header)
+            writer.writerows(results)
+
+        cursor.close()
+        conn.close()    
+        
+        #get count of files that were actually moved
+        with open(tera_log, 'r', encoding='utf8') as input:
+            csvreader = csv.reader(input)
+            count = sum(1 for row in csvreader) - 1
+        print('\n\t%s files successfully transferred to %s.' % (count, current_barcode_item.files_dir))
+        
+        #record premis
+        self.record_premis(timestamp, event_type, event_outcome, event_detail, event_detail_note, agent_id, current_barcode_item)       
+            
+        print('\n\tFile replication completed; proceed to content analysis.')
+
+    def fc5025_image(self, current_barcode_item):
+    
+        print('\n\n\DISK IMAGE CREATION: DeviceSideData FC5025\n\n\tSOURCE: 5.25" floppy disk \n\tDESTINATION: %s\n\n' % current_barcode_item.imagefile)       
+
+        timestamp = str(datetime.datetime.now())
+        
+        copycmd = 'fcimage -f %s %s | tee -a %s' % (self.disk_type_options[self.disk_525_type], current_barcode_item.imagefile, current_barcode_item.fc5025_log)
+
+        exitcode = subprocess.call(copycmd, shell=True, text=True)
+        
+        #NOTE: FC5025 will return non-zero exitcode if any errors detected.  As disk image creation may still be 'successful', we will fudge the results a little bit.  Failure == no disk image.
+        if exitcode != 0:
+            
+            if os.stat(imagefile).st_size > 0:
+                exitcode = 0
+            
+            else:
+                print('\n\nWARNING: Disk image not successfully created. Verify you have selected the correct disk type and try again (if possible).  Otherwise, indicate issues in note to collecting unit.')
+                return
+        
+        self.record_premis(timestamp, 'disk image creation', exitcode, copycmd, 'Extracted a disk image from the physical information carrier.', 'FCIMAGE v1309', current_barcode_item)
+        
+        print('\n\n\tDisk image created; proceeding to next step...')
+    
+    def ddrescue_image(self, current_barcode_item):
+    
+        #for Zip disks, we need to determine the POSIX device name.  To do so, we'll match entry in /proc/partitions with PowerShell report on physical disks
+        if self.source_device == 'Zip':
+            
+            check_device = subprocess.check_output('cat /proc/partitions', text=True)
+            
+            ps_cmd = "Get-Partition | % {New-Object PSObject -Property @{'DiskModel'=(Get-Disk $_.DiskNumber).Model; 'DriveLetter'=$_.DriveLetter}}"
+            cmd = 'powershell.exe "%s"' % ps_cmd
+            out = subprocess.check_output(cmd, shell=True, text=True)
+            
+            for line in out.splitlines():
+                if 'ZIP 100' in line:
+                      drive_ltr = line.split()[2]
+            
+            #verify that drive is recognized by work station
+            try:
+                drive_ltr
+            except UnboundLocalError:
+                print('\n\nNOTE: Zip drive not recognized.  If you have not done so, insert disk into drive and allow device to complete initial loading.')
+                return
+            
+            #match PowerShell output with device name from /proc/partitions
+            for line in check_device.splitlines():
+                if len(line.split()) == 5 and drive_ltr in line.split()[4]:
+                    dd_target = '/dev/%s' % line.split()[3]
+        
+        #if 'other' device (i.e., hard drive or USB drive), verify device name
+        elif self.source_device == 'Other':
+
+            if self.other_device in check_device:
+                dd_target = '/dev/%s' % self.other_device
+            else:
+                print('\nNOTE: device name "%s" not found in /proc/partitions; verify and try again.' % self.other_device)
+                return
+        
+        else:
+            dd_target = self.source_device
+            
+        print('\n\nDISK IMAGE CREATION: DDRESCUE\n\n\tSOURCE: %s \n\tDESTINATION: %s' % (dd_target, current_barcode_item.imagefile))
+        
+        migrate_ver = subprocess.check_output('ddrescue -V', shell=True, text=True).split('\n', 1)[0]  
+        
+        timestamp1 = str(datetime.datetime.now())
+        
+        copycmd1 = 'ddrescue -n %s %s %s' % (dd_target, current_barcode_item.imagefile, current_barcode_item.mapfile)
+    
+        #run commands via subprocess; per ddrescue instructions, we need to run it twice    
+        print('\n--------------------------------------First pass with ddrescue------------------------------------\n')
+        exitcode1 = subprocess.call(copycmd1, shell=True, text=True)
+        
+        self.record_premis(timestamp1, 'disk image creation', exitcode1, copycmd1, 'First pass; extracted a disk image from the physical information carrier.', migrate_ver, current_barcode_item)
+        
+        #new timestamp for second pass (recommended by ddrescue developers)
+        timestamp2 = str(datetime.datetime.now())
+        
+        copycmd2 = 'ddrescue -d -r2 %s %s %s' % (dd_target, current_barcode_item.imagefile, current_barcode_item.mapfile)
+        
+        print('\n\n--------------------------------------Second pass with ddrescue------------------------------------\n')
+        
+        exitcode2 = subprocess.call(copycmd2, shell=True, text=True)
+        
+        if os.path.exists(current_barcode_item.imagefile) and os.stat(current_barcode_item.imagefile).st_size > 0:
+            print('\n\n\tDisk image created; proceeding to next step...')
+            exitcode2 = 0
+            self.record_premis(timestamp2, 'disk image creation', exitcode2, copycmd2, 'Second pass; extracted a disk image from the physical information carrier.', migrate_ver, current_barcode_item))
+        else:
+            print('\n\nDISK IMAGE CREATION FAILED: Indicate any issues in note to collecting unit.')
+    
+    def record_premis(self, timestamp, event_type, event_outcome, event_detail, event_detail_note, agent_id, current_barcode_item):
+        
+        #retrieve our premis_list
+        premis_list = pickle_load(current_barcode_item, 'ls', 'premis_list')
+        
+        temp_premis = []
+        
+        temp_dict = {}
+        temp_dict['eventType'] = event_type
+        temp_dict['eventOutcomeDetail'] = event_outcome
+        temp_dict['timestamp'] = timestamp
+        temp_dict['eventDetailInfo'] = event_detail
+        temp_dict['eventDetailInfo_additional'] = event_detail_note
+        temp_dict['linkingAgentIDvalue'] = agent_id
+        
+        temp_premis.append(temp_dict)
+        
+        #JUST IN CASE: check to see if we've already written to a premis file (may happen if we have to rerun procedures)
+        if os.path.exists(current_barcode_item.premis_path):
+            
+            #check to see if operation has already been completed (we'll write an empty file once we've done so)
+            premis_xml_included = os.path.join(current_barcode_item.temp_dir, 'premis_xml_included.txt')
+            if not os.path.exists(premis_xml_included):
+            
+                temp_premis = []
+            
+                PREMIS_NAMESPACE = "http://www.loc.gov/premis/v3"
+                NSMAP = {'premis' : PREMIS_NAMESPACE, "xsi": "http://www.w3.org/2001/XMLSchema-instance"}
+                parser = etree.XMLParser(remove_blank_text=True)
+                tree = etree.parse(premis_path, parser=parser)
+                root = tree.getroot()
+                events = tree.xpath("//premis:event", namespaces=NSMAP)
+                
+                for e in events:
+                    temp_dict = {}
+                    temp_dict['eventType'] = e.findtext('./premis:eventType', namespaces=NSMAP)
+                    temp_dict['eventOutcomeDetail'] = e.findtext('./premis:eventOutcomeInformation/premis:eventOutcome', namespaces=NSMAP)
+                    temp_dict['timestamp'] = e.findtext('./premis:eventDateTime', namespaces=NSMAP)
+                    temp_dict['eventDetailInfo'] = e.findall('./premis:eventDetailInformation/premis:eventDetail', namespaces=NSMAP)[0].text
+                    temp_dict['eventDetailInfo_additional'] = e.findall('./premis:eventDetailInformation/premis:eventDetail', namespaces=NSMAP)[1].text
+                    temp_dict['linkingAgentIDvalue'] = e.findall('./premis:linkingAgentIdentifier/premis:linkingAgentIdentifierValue', namespaces=NSMAP)[1].text
+                    
+                    if not temp_dict in temp_premis:
+                        temp_premis.append(temp_dict)
+                    
+                #now sort based on ['timestamp'] to make sure we're in chronological order
+                temp_premis.sort(key=lambda x:x['timestamp'])
+                
+                #now create our premis_xml_included.txt file so we don't go through this again.
+                open(premis_xml_included, 'a').close()
+
+        #now save our premis list
+        pickle_dump(current_barcode_item, 'premis_list', premis_list)
+
 
 def close_app(window):
     print('BYE!')
@@ -797,6 +895,32 @@ def newscreen():
             print('\n')
     else:
         print('Missing ASCII art header file; download to: %s' % fname)
+
+def pickle_load(current_barcode_item, array_type, array_name):
+        
+    temp_file = os.path.join(current_barcode_item.temp_dir, '{}.txt'.format(array_name))
+    
+    if array_type == 'ls':
+        temp_array = []
+    elif array_type == 'dict':
+        temp_array = {}
+    
+    #make sure there's something in the file
+    if os.path.exists(temp_file) and os.path.getsize(temp_file) > 0:
+        with open(temp_file, 'rb') as file:
+            temp_array = pickle.load(file)
+                    
+    return temp_array
+
+def pickle_dump(current_barcode_item, array_name, array_instance):
+    
+    temp_file = os.path.join(current_barcode_item.temp_dir, '{}.txt'.format(array_name))
+     
+    if not os.path.exists(current_barcode_item.temp_dir):
+        os.makedirs(current_barcode_item.temp_dir)
+        
+    with open(temp_file, 'wb') as file:
+        pickle.dump(array_instance, file)
 
 def main():
     #clear CMD.EXE screen and print logo
