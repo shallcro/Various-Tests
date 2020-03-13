@@ -610,10 +610,8 @@ class ItemBarcode(Shipment):
         self.folders_created = os.path.join(self.temp_dir, 'folders-created.txt')
         self.sqlite_done = os.path.join(self.temp_dir, 'sqlite_done.txt')
         self.done_file = os.path.join(self.temp_dir, 'done.txt')
-        if self.controller.job_type.get() in ['DVD', 'CDDA']:
-            self.checksums = os.path.join(self.temp_dir, 'checksums_di.txt')
-        else:
-            self.checksums = os.path.join(self.temp_dir, 'checksums.txt')
+        self.checksums_dvd = os.path.join(self.temp_dir, 'checksums_dvd.txt')
+        self.checksums = os.path.join(self.temp_dir, 'checksums.txt')
 
         #metadata files
         self.dfxml_output = os.path.join(self.metadata_dir, '{}-dfxml.xml'.format(self.item_barcode))
@@ -674,7 +672,7 @@ class ItemBarcode(Shipment):
     
     def verify_analysis_details(self):
         if self.controller.job_type.get() is None:
-            return (False, '\nWARNING: Indicate the appropriate job type for this item and then run transfer again.'
+            return (False, '\nWARNING: Indicate the appropriate job type for this item and then run transfer again.')
         else:
             self.job_type = self.controller.job_type.get()
         
@@ -686,7 +684,7 @@ class ItemBarcode(Shipment):
     
     def verify_transfer_details(self):
         if self.controller.job_type.get() is None:
-            return (False, '\nWARNING: Indicate the appropriate job type for this item and then run transfer again.'
+            return (False, '\nWARNING: Indicate the appropriate job type for this item and then run transfer again.')
             
         else:
             self.job_type = self.controller.job_type.get()
@@ -728,7 +726,7 @@ class ItemBarcode(Shipment):
         if self.job_type == 'Disk_image':
             #must have a source device selected.
             if self.source_device is None:
-                return (False, '\nWARNING: Indicate the appropriate source media/device for this item and then run transfer again.'
+                return (False, '\nWARNING: Indicate the appropriate source media/device for this item and then run transfer again.')
             
             #make sure that a disk type is selected if this is a 5.25" floppy    
             if self.source_device == '5.25':
@@ -774,10 +772,10 @@ class ItemBarcode(Shipment):
                 
                 elif self.source_device == 'Other':
                     if self.other_device in posix_names:
-                        self.ddrescue_target '/dev/{}'.format(self.other_device)
+                        self.ddrescue_target = '/dev/{}'.format(self.other_device)
                         return (True, 'Ready to transfer')
                     else:
-                        return (False '\nWARNING: device "{}" was not found in /proc/partitions; verify name, re-enter information, and attempt transfer again.'.format(self.other_device))
+                        return (False, '\nWARNING: device "{}" was not found in /proc/partitions; verify name, re-enter information, and attempt transfer again.'.format(self.other_device))
     
     def secure_copy(self, content_source):
 
@@ -1090,7 +1088,6 @@ class ItemBarcode(Shipment):
     def produce_dfxml(self, target):
     
         timestamp = str(datetime.datetime.now())
-        
         file_stats = []
         
         #use fiwalk if we have an image file
@@ -1155,6 +1152,26 @@ class ItemBarcode(Shipment):
                     print('\r\tWorking on file #: %s' % counter, end='')
 
                 element.clear()
+                
+            if self.job_type == 'DVD':
+            
+                #save info from DVD checksums to separate file
+                with open (self.checksums_dvd, 'wb') as f:
+                    pickle.dump(file_stats, f)
+                
+                #now compile stats for the normalized file versions
+                file_stats = []
+                for f in os.listdir(self.files_dir):
+                    file = os.path.join(self.files_dir, f)
+                    file_dict = {}
+                    size = os.path.getsize(file)
+                    mtime = datetime.datetime.fromtimestamp(os.path.getmtime(file)).isoformat()
+                    ctime = datetime.datetime.fromtimestamp(os.path.getctime(file)).isoformat()
+                    atime = datetime.datetime.fromtimestamp(os.path.getatime(file)).isoformat()[:-7]
+                    checksum = md5(file)
+                    
+                    file_dict = { 'name' : file, 'size' : size, 'mtime' : mtime, 'ctime' : ctime, 'atime' : atime, 'checksum' : checksum}
+                    file_stats.append(file_dict)  
      
         #use custom operation for other cases    
         elif os.path.isdir(target):
@@ -1521,7 +1538,7 @@ class ItemBarcode(Shipment):
                 
                 #now write the new cue file
                 with open(new_cue, 'w') as outfile:
-                    outfile.write('FILE "{}.wav" WAVE\n'format(self.item_barcode))
+                    outfile.write('FILE "{}.wav" WAVE\n'.format(self.item_barcode))
                     
                 with open(new_cue, 'ab') as outfile:
                     for line in cue_info:
@@ -1537,7 +1554,7 @@ class ItemBarcode(Shipment):
         
         print('\n\nAUDIO CONTENT NORMALIZATION: CDPARANOIA\n\n\tSOURCE: {} \n\tDESTINATION: {}\n'.format(self.source_device, self.paranoia_out))
         
-        paranoia_cmd = 'cd-paranoia -l {} -w [00:00:00.00]- {}'format(self.paranoia_log, self.paranoia_out)
+        paranoia_cmd = 'cd-paranoia -l {} -w [00:00:00.00]- {}'.format(self.paranoia_log, self.paranoia_out)
         
         timestamp = str(datetime.datetime.now())
         exitcode = subprocess.call(paranoia_cmd, shell=True, text=True)
@@ -1766,8 +1783,7 @@ class IngestJob:
         #store virus scan results in metadata_dict
         with open(virus_log, 'r') as f:
             if "Infected files: 0" not in f.read():
-                self.barcode_item.metadata_dict['virus_scan_results'] = 'WARNING! Virus or malware found; see %s.' % virus_log
-            
+                self.barcode_item.metadata_dict['virus_scan_results'] = 'WARNING! Virus or malware found; see %s.' % virus_log            
             else:
                 self.barcode_item.metadata_dict['virus_scan_results'] = '-'
 
@@ -1883,6 +1899,7 @@ class IngestJob:
         cursor = conn.cursor()
 
         print('\n\tImporting siegried file to sqlite3 database...')
+        
         """Import csv file into sqlite db"""
         f = open(self.barcode_item.sf_file, 'r', encoding='utf8')
         
@@ -1977,33 +1994,13 @@ class IngestJob:
         cursor.execute("SELECT COUNT(*) from siegfried where filesize='0';") # empty files
         empty_files = cursor.fetchone()[0]
         
-        #for DVDs, we will use stats from normalized files; however, we will also need disk image stats
-        if self.job_type == 'DVD':
-            file_stats = []
-            for f in os.listdir(self.barcode_item.files_dir):
-                file = os.path.join(self.barcode_item.files_dir, f)
-                file_dict = {}
-                size = os.path.getsize(file)
-                mtime = datetime.datetime.fromtimestamp(os.path.getmtime(file)).isoformat()
-                ctime = datetime.datetime.fromtimestamp(os.path.getctime(file)).isoformat()
-                atime = datetime.datetime.fromtimestamp(os.path.getatime(file)).isoformat()[:-7]
-                checksum = md5(file)
-                
-                file_dict = { 'name' : file, 'size' : size, 'mtime' : mtime, 'ctime' : ctime, 'atime' : atime, 'checksum' : checksum}
-                file_stats.append(file_dict)
-            
-            try:
-                with open(self.barcode_item.checksums, 'rb') as f:
-                    file_stats_di = pickle.load(f)
-            except FileNotFoundError:
-                pass
-        else:
-            file_stats = []
-            try:
-                with open(self.barcode_item.checksums, 'rb') as f:
-                    file_stats = pickle.load(f)
-            except FileNotFoundError:
-                pass
+        #retrieve our 'file stats'
+        file_stats = []
+        try:
+            with open(self.barcode_item.checksums, 'rb') as f:
+                file_stats = pickle.load(f)
+        except FileNotFoundError:
+            pass
             
         #Get stats on duplicates. Just in case the bdpl ingest tool crashes after compiling a duplicates list, we'll check to see if it already exists
         dup_list = []
@@ -2044,17 +2041,19 @@ class IngestJob:
             
         cursor.execute("SELECT COUNT(*) FROM siegfried WHERE id='UNKNOWN';") # unidentified files
         unidentified_files = cursor.fetchone()[0]
-
-        #next get date information using info pulled from dfxml
-        date_info = []
         
         #for dvd jobs, we need to use disk image metadata for dates...
         if self.job_type == 'DVD':
-            file_stats = file_stats_di
-        
-        #let's not accept file mtimes that were set when content was replicated.  Compare file time against timestamp for replication...
+            try:
+                with open(self.checksums_dvd, 'rb') as f:
+                    file_stats = pickle.load(f)
+            except FileNotFoundError:
+                pass
+                
+        #For reporting purposes, we want to catch any files whose current 'mtime' was set to the replication in the BDPL process.
         premis_list = pickle_load(self.temp_dir, 'ls', 'premis_list')
         
+        #first, establish when we ran the replication operation
         try:
             bdpl_time = [p for p in premis_list if p['eventType'] == 'replication'][0]['timestamp'].split('.')[0].replace('T', ' ')
         except IndexError:
@@ -2062,6 +2061,9 @@ class IngestJob:
         
         bdpl_time = datetime.datetime.strptime(bdpl_time, "%Y-%m-%d %H:%M:%S")
         
+        #next, go through or file list.  If the 'mtime' is more recent than the 'BDPL' replication action, that means we don't have the original file timestamp.  Only record older/original dates in a date_info list
+        date_info = []
+        undated_count = []
         if len(file_stats) > 0:
             for dctnry in file_stats:
                 dt_time = dctnry['mtime'].replace('T', ' ').split('.')[0]
@@ -2069,33 +2071,27 @@ class IngestJob:
                 if dt_time < bdpl_time:
                     date_info.append(dctnry['mtime'])
                 else:
-                    date_info.append('undated')
+                    undated_count.append('undated')
             
-            #remove all occurences of 'undated', to get better info
-            date_info_check = [x for x in date_info if x != 'undated']
+        #If we've collected any dates in our date_info list, set date ranges and then record years in separate list
+        if len(date_info) > 0:
+            begin_date = min(date_info)[:4]
+            end_date = max(date_info)[:4]
+            earliest_date = min(date_info)
+            latest_date = max(date_info)   
             
-            if len(date_info_check) > 0:
-                begin_date = min(date_info_check)[:4]
-                end_date = max(date_info_check)[:4]
-                earliest_date = min(date_info_check)
-                latest_date = max(date_info_check)   
+            year_info = [x[:4] for x in date_info]
             
-            else:
-                begin_date = "undated"
-                end_date = "undated"
-                earliest_date = "undated"
-                latest_date = "undated"
-        
+        #if date_info is empty, record 'undated' for date ranges
         else:
             begin_date = "undated"
             end_date = "undated"
             earliest_date = "undated"
             latest_date = "undated"
             
-        #generate a year count
-        year_info = [x[:4] for x in date_info]
-        year_info = [x if x != 'unda' else 'undated' for x in year_info]
-        
+            year_info = undated_count
+            
+        #get frequency of each year for report       
         year_count = dict(Counter(year_info))
         
         path = os.path.join(self.barcode_item.reports_dir, 'years.csv')    
@@ -2219,6 +2215,67 @@ class IngestJob:
         
         #save metadata_dict to file just in case...
         pickle_dump(self.temp_dir, 'metadata_dict', self.barcode_item.metadata_dict)
+    
+    def generate_reports(cursor, html_doc, folders, re_analyze, item_barcode):
+        
+        print('\n\tGenerating format reports and writing html...')
+        
+        """Run sql queries on db to generate reports, write to csv and html"""
+        full_header = ['Filename', 'Filesize', 'Date modified', 'Errors', 
+                    'Namespace', 'ID', 'Format', 'Format version', 'MIME type', 
+                    'Basis for ID', 'Warning']
+        
+        # sorted format list report
+        path = os.path.join(reports_dir, 'formats.csv')
+        if not os.path.exists(path) or re_analyze:
+            sql = "SELECT format, id, COUNT(*) as 'num' FROM siegfried GROUP BY format ORDER BY num DESC"
+            format_header = ['Format', 'ID', 'Count']
+            sqlite_to_csv(sql, path, format_header, cursor)
+        write_html('File formats', path, ',', html_doc, folders, item_barcode)
+
+        # sorted format and version list report
+        path = os.path.join(reports_dir, 'formatVersions.csv')
+        if not os.path.exists(path) or re_analyze:
+            sql = "SELECT format, id, version, COUNT(*) as 'num' FROM siegfried GROUP BY format, version ORDER BY num DESC"
+            version_header = ['Format', 'ID', 'Version', 'Count']
+            sqlite_to_csv(sql, path, version_header, cursor)
+        write_html('File format versions', path, ',', html_doc, folders, item_barcode)
+
+        # sorted mimetype list report
+        path = os.path.join(reports_dir, 'mimetypes.csv')
+        if not os.path.exists(path) or re_analyze:
+            sql = "SELECT mime, COUNT(*) as 'num' FROM siegfried GROUP BY mime ORDER BY num DESC"
+            mime_header = ['MIME type', 'Count']
+            sqlite_to_csv(sql, path, mime_header, cursor)
+        write_html('MIME types', path, ',', html_doc, folders, item_barcode)
+
+        # dates report
+        path = os.path.join(reports_dir, 'years.csv')
+        write_html('Last modified dates by year', path, ',', html_doc, folders, item_barcode)
+        
+        # unidentified files report
+        path = os.path.join(reports_dir, 'unidentified.csv')
+        if not os.path.exists(path) or re_analyze:
+            sql = "SELECT * FROM siegfried WHERE id='UNKNOWN';"
+            sqlite_to_csv(sql, path, full_header, cursor)
+        write_html('Unidentified', path, ',', html_doc, folders, item_barcode)
+        
+        # errors report
+        path = os.path.join(reports_dir, 'errors.csv')
+        if not os.path.exists(path) or re_analyze:
+            sql = "SELECT * FROM siegfried WHERE errors <> '';"
+            sqlite_to_csv(sql, path, full_header, cursor)
+        write_html('Errors', path, ',', html_doc, folders, item_barcode)
+        
+        # duplicates report: retrieve our 'duplicates' file instead of CSV
+        dup_list = pickle_load('duplicates', folders, item_barcode)
+        write_html('Duplicates', dup_list, ',', html_doc, folders, item_barcode)
+        
+        #PII report: 
+        cumulative_report = os.path.join(bulkext_dir, 'cumulative.txt')
+        if os.path.exists(cumulative_report):
+            write_html('Personally Identifiable Information (PII)', cumulative_report, '\n', html_doc, folders, item_barcode)
+        
     
     def check_premis(self, term):
         #check to see if an event is already in our premis list--i.e., it's been successfully completed.  Currently only used for most resource-intensive operations: virus scheck, sensitive data scan, format id, and checksum calculation.
