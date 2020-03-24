@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import datetime
 import glob
 import openpyxl
 import os
@@ -68,6 +69,10 @@ class BdplMainApp(tk.Tk):
         self.help_ = tk.Menu(self.menubar)
         self.menubar.add_cascade(menu=self.help_, label='Help')
         self.help_.add_command(label='Open BDPL wiki', command = lambda: webbrowser.open_new(r"https://wiki.dlib.indiana.edu/display/DIGIPRES/Born+Digital+Preservation+Lab"))
+        self.actions_ = tk.Menu(self.menubar)
+        self.menubar.add_cascade(menu=self.actions_, label='Other actions')
+        self.actions_.add_command(label='Check shpt. status')
+        self.actions_.add_command(label='Move media images')
 
     def get_current_tab(self):
         return self.bdpl_notebook.tab(self.bdpl_notebook.select(), 'text')
@@ -86,6 +91,109 @@ class BdplMainApp(tk.Tk):
                 
         #if we get through the above, then we are good to go!
         return (True, 'Unit name and shipment date included.')
+        
+    def move_media_images(self):
+        #create unit object
+        current_unit = Unit(self)
+        
+        #make sure unit value is not empty and that 
+        if current_unit.unit_name == '':
+            '\n\nError; please make sure you have entered a unit ID abbreviation.'
+            return 
+                
+        if len(os.listdir(current_unit.media_image_dir)) == 0:
+            print('\n\nNo images of media at {}'.format(current_unit.media_image_dir))
+            return
+        
+        # get a list of barcodes in each shipment
+        all_barcode_folders = list(filter(lambda f: os.path.isdir(f), glob.glob('{}\\*\\*'.format(current_unit.unit_home))))
+
+        #list of files with no parent
+        bad_file_list = []
+        
+        #loop through a list of all images in this folder; try to find match in list of barcodes; if not, add to 'bad file list'
+        for f in os.listdir(current_unit.media_image_dir):
+            pic = f.split('-')[0]
+            barcode_folder = [s for s in all_barcode_folders if pic in s]
+            if len(barcode_folder) == 1:
+                media_pics = os.path.join(barcode_folder[0], 'metadata', 'media-image')
+                if not os.path.exists(media_pics):
+                    os.makedirs(media_pics)
+                try:
+                    shutil.move(os.path.join(current_unit.media_image_dir, f), media_pics)
+                except shutil.Error as e:
+                    print('NOTE: ', e)
+                    print('\n\nCheck the media image folder to determine if a file already exists or a filename is being duplicated.')
+            else:
+                bad_file_list.append(f)
+            
+        if len(bad_file_list) > 0:
+            print('\n\nFilenames for the following images do not match current barcodes:\n{}'.format('\n'.join(bad_file_list)))
+            print('\nPlease correct filenames and try again.')
+        else:
+            print('\n\nMedia images successfully copied!')
+
+    def check_progress(self):
+        
+        
+        if not verify_data(unit_name, shipmentDate, '', 'check_progress'):
+            return
+        
+        folders = bdpl_folders(unit_name, shipmentDate)
+        ship_dir = folders['ship_dir']
+        
+        spreadsheet = find_spreadsheet(folders, unit_name, shipmentDate)    
+        if os.path.exists(spreadsheet):
+            wb = openpyxl.load_workbook(spreadsheet)
+        else:
+            return
+        
+        try:
+            app_ws = wb['Appraisal']
+        except KeyError:
+            print('\n\nConsult with Digital Preservation Librarian; "Appraisal" worksheet does not exist.')
+            return
+        
+        try:
+            inv_ws = wb['Inventory']
+        except KeyError:
+            print('\n\nConsult with Digital Preservation Librarian; "Inventory" worksheet does not exist.')
+            return    
+        
+        #get list of all barcodes on appraisal spreadsheet
+        app_barcodes = []
+        for col in app_ws['A'][1:]:
+            if not col.value is None:
+                app_barcodes.append(str(col.value))
+        
+        #get list of all barcodes on inventory spreadsheet
+        inv_barcodes = {}
+        for col in inv_ws['A'][1:]:
+            if not col.value is None:
+                inv_barcodes[str(col.value)] = col.row
+        
+        inv_list = list(inv_barcodes.keys())        
+        
+        #check to see if there are any duplicate barcodes in the inventory; print warning if so
+        duplicate_barcodes = [item for item, count in Counter(inv_list).items() if count > 1]
+        
+        if duplicate_barcodes:
+            print('\n\nWARNING! Inventory contains at least one duplicate barcode:')
+            for dup in duplicate_barcodes:
+                print('\t%s\tRow: %s' % (dup, inv_barcodes[dup]))
+        
+        current_total = len(inv_list) - len(app_barcodes)
+        
+        items_not_done = list(set(inv_list) - set(app_barcodes))
+        
+        print('\n\nCurrent status: %s out of %s items have been ingested. \n\n%s remain.' % (len(app_barcodes), len(inv_list), current_total))
+        
+        if len(items_not_done) > 0:
+            print('\n\nThe following barcodes require ingest:\n%s' % '\n'.join(items_not_done))
+        
+        #reprint total if list is long...
+        if len(items_not_done) > 15:    
+            print('\n\nCurrent status: %s out of %s items have been ingested. \n\n%s remain.' % (len(app_barcodes), len(inv_list), current_total))
 
 class BdplIngest(tk.Frame):
     def __init__(self, parent, controller):
@@ -185,12 +293,11 @@ class BdplIngest(tk.Frame):
 
         #now use button instances to assign commands
         button_id['New'].config(command = self.clear_gui)
-        button_id['Load'].config(command = lambda: self.launch_session(self.controller))
-        #button_id['Transfer'].config(command = lambda: )
-        #button_id['Analyze'].config(command = lambda: )
+        button_id['Load'].config(command = self.launch_session)
+        button_id['Transfer'].config(command = self.launch_transfer)
+        button_id['Analyze'].config(command = self.launch_analysis)
         button_id['Add PREMIS']['state'] = 'disabled'
         button_id['Quit'].config(command = lambda: close_app(self.controller))
-
 
         '''
         BDPL NOTE FRAME: text widget to record notes on the transfer/analysis process.  Also checkbox to document item failure
@@ -203,7 +310,7 @@ class BdplIngest(tk.Frame):
         self.bdpl_technician_note.grid(row=0, column=0, padx=(30, 0), pady=10)
         self.bdpl_note_scroll.grid(row=0, column=1, padx=(0, 10), pady=(10, 0), sticky='ns')
 
-        ttk.Button(self.tab_frames_dict['bdpl_note_frame'], text="Save", width=5, command= lambda: print(self.bdpl_technician_note.get(1.0, END))).grid(row=0, column=2, padx=10)
+        ttk.Button(self.tab_frames_dict['bdpl_note_frame'], text="Save", width=5, command=self.write_technician_note).grid(row=0, column=2, padx=10)
 
         self.controller.bdpl_failure_notification.set(False)
 
@@ -256,9 +363,7 @@ class BdplIngest(tk.Frame):
 
         self.date_combobox['values'] = combobox_list
 
-    def launch_session(self, controller):
-        self.controller = controller
-
+    def launch_session(self):
         newscreen()
         
         #make sure main variables--unit_name, shipment_date, and barcode--are included.  Return if either is missing
@@ -271,20 +376,20 @@ class BdplIngest(tk.Frame):
         if self.controller.get_current_tab() == 'BDPL Ingest':
 
             #create a barcode object and a spreadsheet object
-            current_barcode_item = ItemBarcode(self.controller)
+            current_barcode = ItemBarcode(self.controller)
             current_spreadsheet = Spreadsheet(self.controller)
 
             #verify spreadsheet--make sure we only have 1 & that it follows naming conventions
             status, msg = current_spreadsheet.verify_spreadsheet()
             print(msg)
             if not status:
-                del current_barcode_item, current_spreadsheet
+                del current_barcode, current_spreadsheet
                 return
 
             #make sure spreadsheet is not open
             if current_spreadsheet.already_open():
                 print('\n\nWARNING: {} is currently open.  Close file before continuing and/or contact digital preservation librarian if other users are involved.'.format(current_spreadsheet.spreadsheet))
-                del current_barcode_item, current_spreadsheet
+                del current_barcode, current_spreadsheet
                 return
                 
             #open spreadsheet and make sure current item exists in spreadsheet; if not, return
@@ -292,31 +397,33 @@ class BdplIngest(tk.Frame):
             status, row = current_spreadsheet.return_inventory_row()
             if not status:
                 print('\n\nWARNING: barcode was not found in spreadsheet.  Make sure value is entered correctly and/or check spreadsheet for value.  Consult with digital preservation librarian as needed.')
-                del current_barcode_item, current_spreadsheet
+                del current_barcode, current_spreadsheet
                 return
             
             #load metadata into item object
-            current_barcode_item.load_item_metadata(current_spreadsheet, row)
+            current_barcode.load_item_metadata(current_spreadsheet, row)
             
             #assign variables to GUI
-            self.controller.content_source_type.set(current_barcode_item.metadata_dict['content_source_type'])
-            self.controller.collection_title.set(current_barcode_item.metadata_dict['collection_title'])
-            self.controller.collection_creator.set(current_barcode_item.metadata_dict['collection_creator'])
-            self.controller.item_title.set(current_barcode_item.metadata_dict.get('item_title', '-'))
-            self.controller.label_transcription.set(current_barcode_item.metadata_dict['label_transcription'])
-            self.controller.item_description.set(current_barcode_item.metadata_dict.get('item_description', '-'))
-            self.controller.appraisal_notes.set(current_barcode_item.metadata_dict['appraisal_notes'])
-            self.controller.bdpl_instructions.set(current_barcode_item.metadata_dict['bdpl_instructions'])
+            self.controller.content_source_type.set(current_barcode.metadata_dict['content_source_type'])
+            self.controller.collection_title.set(current_barcode.metadata_dict['collection_title'])
+            self.controller.collection_creator.set(current_barcode.metadata_dict['collection_creator'])
+            self.controller.item_title.set(current_barcode.metadata_dict.get('item_title', '-'))
+            self.controller.label_transcription.set(current_barcode.metadata_dict['label_transcription'])
+            self.controller.item_description.set(current_barcode.metadata_dict.get('item_description', '-'))
+            self.controller.appraisal_notes.set(current_barcode.metadata_dict['appraisal_notes'])
+            self.controller.bdpl_instructions.set(current_barcode.metadata_dict['bdpl_instructions'])
             
             #create folders
-            if not current_barcode_item.check_ingest_folders(): 
-                current_barcode_item.create_folders()
+            if not current_barcode.check_ingest_folders(): 
+                current_barcode.create_folders() 
+                
+            #check status
+            current_barcode.check_barcode_status()
             
             print('\n\nRecord loaded successfully; ready for next operation.')
     
-    def launch_transfer(self, controller):
-        self.controller = controller
-        
+    def launch_transfer(self):
+
         print('\n\nSTEP 1. TRANSFER CONTENT')
         
         #make sure main variables--unit_name, shipment_date, and barcode--are included.  Return if either is missing
@@ -407,17 +514,6 @@ class BdplIngest(tk.Frame):
         if not status:
             print(msg)
             return
-
-        '''
-        MOVE THIS SOMEWHERE ELSE!
-        
-        #copy in .CSS and .JS files for HTML report
-        if os.path.exists(current_barcode_item.assets_target):
-            pass
-        else:
-            shutil.copytree(current_barcode_item.assets_dir, current_barcode_item.assets_target)
-            
-        '''
             
         '''run antivirus'''
         print('\nVIRUS SCAN: clamscan.exe')
@@ -437,18 +533,18 @@ class BdplIngest(tk.Frame):
                 
                 #if it's an HFS+ file system, we can use fiwalk on the disk image; otherwise, use bdpl_ingest on the file directory
                 if 'hfs+' in [fs.lower() for fs in fs_list]:
-                    current_barcode.produce_dfxml(self.barcode_item.imagefile)
+                    current_barcode.produce_dfxml(self.imagefile)
                 else:
-                    current_barcode.produce_dfxml(self.barcode_item.files_dir)
+                    current_barcode.produce_dfxml(self.files_dir)
             
             elif current_barcode.job_type == 'Copy_only':
-                current_barcode.produce_dfxml(self.barcode_item.files_dir)
+                current_barcode.produce_dfxml(self.files_dir)
             
             elif current_barcode.job_type == 'DVD':
-                current_barcode.produce_dfxml(self.barcode_item.imagefile)
+                current_barcode.produce_dfxml(self.imagefile)
             
             elif current_barcode.job_type == 'CDDA':
-                current_barcode.produce_dfxml(self.barcode_item.image_dir)
+                current_barcode.produce_dfxml(self.image_dir)
                 
         '''run bulk_extractor to identify potential sensitive information (only if disk image or copy job type). Skip if b_e was run before'''
         print('\n\nSENSITIVE DATA SCAN: BULK_EXTRACTOR')
@@ -468,16 +564,106 @@ class BdplIngest(tk.Frame):
             current_barcode.format_analysis()
         
         #load siegfried.csv into sqlite database; skip if it's already completed
-        if not os.path.exists(self.barcode_item.sqlite_done) or current_barcode.re_analyze:
+        if not os.path.exists(self.sqlite_done) or current_barcode.re_analyze:
             current_barcode.import_csv() # load csv into sqlite db
         
-        '''create HTML and CSV reports'''
-        current_barcode.stats_and_report_creation()
+        '''create statistics/reports and write info to HTML'''
+        stats_done = os.path.join(self.temp_dir, 'stats_done.txt')
+        if not os.path.exists(stats_done) or current_barcode.re_analyze:
+            current_barcode.get_stats()
+            current_barcode.generate_html()
         
         #generate PREMIS preservation metadata file
-        premis_path = os.path.join(metadata, '%s-premis.xml' % item_barcode)
-        print_premis(premis_path, folders, item_barcode)
+        current_barcode.print_premis()
+        
+        #write info to spreadsheet for collecting unit to review.  Create a spreadsheet object, make sure spreadsheet isn't already open, and if OK, proceed to write info.
+        current_spreadsheet = Spreadsheet(self.controller)
+        if current_spreadsheet.already_open():
+            print('\n\nWARNING: {} is currently open.  Close file before continuing and/or contact digital preservation librarian if other users are involved.'.format(current_spreadsheet.spreadsheet))
+            del current_barcode, current_spreadsheet
+            return
+        current_spreadsheet.write_to_spreadsheet(current_barcode.metadata_dict)
+           
+        #create file to indicate that process was completed
+        done_file = os.path.join(current_barcode.temp_dir, 'done.txt')
+        if not os.path.exists(done_file):
+            open(done_file, 'a').close()
+            
+        #copy in .CSS and .JS files for HTML report
+        if os.path.exists(current_barcode.assets_target):
+            pass
+        else:
+            shutil.copytree(current_barcode.assets_dir, current_barcode.assets_target)
+        
+        '''clean up; delete disk image folder if empty and remove temp_html'''
+        try:
+            os.rmdir(current_barcode.image_dir)
+        except (WindowsError, PermissionError):
+            pass
+
+        # remove temp html file
+        try:
+            os.remove(os.path.join(current_barcode.temp_dir, 'temp.html'))
+        except WindowsError:
+            pass
+        
+        '''if using gui, print final details about item'''
+        if self.controller.get_current_tab() == 'BDPL Ingest':
+            print('\n\n--------------------------------------------------------------------------------------------------\n\nINGEST PROCESS COMPLETED FOR ITEM {}\n\nResults:\n'.format(current_barcode.item_barcode))
+            
+            final_stats = os.path.join(current_barcode.temp_dir, 'final_stats.txt')
+            du_cmd = 'du64.exe -nobanner "{}" > {}'.format(current_barcode.files_dir, final_stats)
+            
+            subprocess.call(du_cmd, shell=True, text=True)   
+            
+            if os.path.exists(current_barcode.image_dir):
+                di_count = len(os.listdir(current_barcode.image_dir))
+                if di_count > 0:
+                    print('Disk Img(s):   {}'.format(di_count))
+            du_list = ['Files:', 'Directories:', 'Size:', 'Size on disk:']
+            with open(final_stats, 'r') as f:
+                for line, term in zip(f.readlines(), du_list):
+                    if "Directories:" in term:
+                        print(term, ' ', str(int(line.split(':')[1]) - 1).rstrip())
+                    else: 
+                        print(term, line.split(':')[1].rstrip())
+            print('\n\nReady for next item!') 
     
+    def write_technician_note(self):
+        
+        #make sure main variables--unit_name, shipment_date, and barcode--are included.  Return if either is missing
+        status, msg = self.controller.check_main_vars()
+        if not status:
+            print(msg)
+            return
+        
+        #create a barcode object and a spreadsheet object
+        current_barcode = ItemBarcode(self.controller)
+
+        current_barcode.metadata_dict['technician_note'] = self.controller.bdpl_technician_note.get(1.0, END)
+        
+        #additional steps if we are noting failed transfer of item...
+        if self.controller.bdpl_failure_notification.get():
+            current_barcode.metadata_dict['migration_date'] = str(datetime.datetime.now())
+            current_barcode.metadata_dict['migration_outcome'] = "Failure"
+            
+            done_file = os.path.join(current_barcode.temp_dir, 'done.txt')
+            if not os.path.exists(done_file):
+                open(done_file, 'a').close()
+        
+        #save our metadata, just in case...
+        pickle_dump(current_barcode.temp_dir, 'metadata_dict', current_barcode.metadata_dict)
+        
+        #write info to spreadsheet.  Create a spreadsheet object, make sure spreadsheet isn't already open, and if OK, proceed to write info.
+        current_spreadsheet = Spreadsheet(self.controller)
+        if current_spreadsheet.already_open():
+            print('\n\nWARNING: {} is currently open.  Close file before continuing and/or contact digital preservation librarian if other users are involved.'.format(current_spreadsheet.spreadsheet))
+            del current_barcode, current_spreadsheet
+            return
+        current_spreadsheet.write_to_spreadsheet(current_barcode.metadata_dict)
+        
+        print('\n\nInformation saved to Appraisal worksheet.') 
+        
     def clear_gui(self):
         #self.controller = controller
         
@@ -551,6 +737,7 @@ class ItemBarcode(Shipment):
         Shipment.__init__(self, controller)
         self.controller = controller
         self.item_barcode = self.controller.item_barcode.get()
+        self.metadata_dict = pickle_load(self.temp_dir, 'dict', 'metadata_dict')
 
         '''SET UP FOLDERS'''
         #main folders
@@ -562,8 +749,6 @@ class ItemBarcode(Shipment):
         self.reports_dir = os.path.join(self.metadata_dir, "reports")
         self.log_dir = os.path.join(self.metadata_dir, "logs")
         self.bulkext_dir = os.path.join(self.barcode_dir, "bulk_extractor")
-        
-        #variable to c
         self.folders = [self.barcode_dir, self.image_dir, self.files_dir, self.metadata_dir, self.temp_dir, self.reports_dir, self.log_dir, self.bulkext_dir, self.media_image_dir]
 
         '''SET UP FILES'''
@@ -617,9 +802,19 @@ class ItemBarcode(Shipment):
         self.dfxml_output = os.path.join(self.metadata_dir, '{}-dfxml.xml'.format(self.item_barcode))
         self.premis_path = os.path.join(self.metadata_dir, '{}-premis.xml'.format(self.item_barcode))
         
+    def check_barcode_status(self):
+        #If a 'done' file exists, we know the whole process was completed
+        done_file = os.path.join(self.temp_dir, 'done.txt')
+        if os.path.exists(done_file): 
+            print('\n\nNOTE: this item barcode has completed the entire BDPL Ingest workflow.  Consult with the digital preservation librarian if you believe additional procedures are needed.')
+            
+        #if no 'done' file, see where we are with the item...
+        else:
+            premis_list = pickle_load(self.temp_dir, 'ls', 'premis_list')
+            if len(premis_list) > 0:
+                print('\n\nIngest of item has been initiated; the following procedures have been completed:\n\t{}'.format('\n\t'.join(list(set((i['%s' % 'eventType'] for i in premis_list))))))
+                
     def load_item_metadata(self, current_spreadsheet, item_row):
-        
-        self.metadata_dict = pickle_load(self.temp_dir, 'dict', 'metadata_dict')
         
         #if dict is empty, get info from Inventory spreadsheet
         if len(self.metadata_dict) == 0:
@@ -649,7 +844,7 @@ class ItemBarcode(Shipment):
                 self.metadata_dict[val] = '-'
         
         #save a copy so we can access later
-        pickle_dump(self, 'metadata_dict', self.metadata_dict)
+        pickle_dump(self.temp_dir, 'metadata_dict', self.metadata_dict)
     
     def check_ingest_folders(self):
         
@@ -831,7 +1026,7 @@ class ItemBarcode(Shipment):
         
     def fc5025_image(self):
     
-        print('\n\n\DISK IMAGE CREATION: DeviceSideData FC5025\n\n\tSOURCE: 5.25" floppy disk \n\tDESTINATION: %s\n\n' % self.imagefile)       
+        print('\n\n\DISK IMAGE CREATION: DeviceSideData FC5025\n\n\tSOURCE: 5.25" floppy disk \n\tDESTINATION: {}\n\n'.format(self.imagefile))       
 
         timestamp = str(datetime.datetime.now())
         copycmd = 'fcimage -f {} {} | tee -a {}'.format(self.disk_type_options[self.disk_525_type], self.imagefile, self.fc5025_log)
@@ -914,7 +1109,7 @@ class ItemBarcode(Shipment):
         pickle_dump(self.temp_dir, 'fs_list', fs_list)
         
         #run fsstat: get range of meta-data values (inode numbers) and content units (blocks or clusters)
-        fsstat_ver = 'fsstat: %s' % subprocess.check_output('fsstat -V', shell=True, text=True).strip()
+        fsstat_ver = 'fsstat: {}'.format(subprocess.check_output('fsstat -V', shell=True, text=True).strip())
         fsstat_command = 'fsstat {} > {} 2>&1'.format(self.imagefile, self.fsstat_output)
         timestamp = str(datetime.datetime.now())
         
@@ -931,7 +1126,7 @@ class ItemBarcode(Shipment):
         self.record_premis(timestamp, 'forensic feature analysis', exitcode, fsstat_command, 'Determined range of meta-data values (inode numbers) and content units (blocks or clusters)', fsstat_ver, self.barcode_item)
 
         #run ils to document inode information
-        ils_ver = 'ils: %s' % subprocess.check_output('ils -V', shell=True, text=True).strip()
+        ils_ver = 'ils: {}'.format(subprocess.check_output('ils -V', shell=True, text=True).strip())
         ils_command = 'ils -e {} > {} 2>&1'.format(self.imagefile, self.ils_output)
         timestamp = str(datetime.datetime.now())
         try:
@@ -947,7 +1142,7 @@ class ItemBarcode(Shipment):
         self.record_premis(timestamp, 'forensic feature analysis', exitcode, ils_command, 'Documented all inodes found on disk image.', ils_ver, self.barcode_item)
         
         #run mmls to document the layout of partitions in a volume system
-        mmls_ver = 'mmls: %s' % subprocess.check_output('mmls -V', shell=True, text=True).strip()
+        mmls_ver = 'mmls: {}'.format(subprocess.check_output('mmls -V', shell=True, text=True).strip())
         mmls_command = 'mmls {} > {} 2>NUL'.format(self.imagefile, self.mmls_output)
         timestamp = str(datetime.datetime.now())
         exitcode = subprocess.call(mmls_command, shell=True, text=True) 
@@ -986,7 +1181,7 @@ class ItemBarcode(Shipment):
         #get our software versions for unhfs and tsk_recover
         cmd = 'unhfs 2>&1'
         unhfs_tool_ver = subprocess.check_output(cmd, shell=True, text=True).splitlines()[0]
-        tsk_tool_ver = 'tsk_recover: %s ' % subprocess.check_output('tsk_recover -V', text=True).strip()
+        tsk_tool_ver = 'tsk_recover: {}'.format(subprocess.check_output('tsk_recover -V', text=True).strip())
         
         #now get information on filesystems and (if present) partitions.  We will need to choose which tool to use based on file system; if UDF or ISO9660 present, use TeraCopy; otherwise use unhfs or tsk_recover
         secure_copy_list = ['udf', 'iso9660']
@@ -1081,7 +1276,7 @@ class ItemBarcode(Shipment):
         
         elif tool == 'unhfs' and os.path.exists(outfolder):
             file_count = sum([len(files) for r, d, files in os.walk(outfolder)])
-            print('\t%s files successfully transferred to %s.' % (file_count, outfolder))
+            print('\t{} files successfully transferred to {}.'.format(file_count, outfolder))
             
         print('\n\tFile replication completed; proceed to content analysis.')
     
@@ -1149,7 +1344,7 @@ class ItemBarcode(Shipment):
                     file_stats.append(file_dict)
                     
                     counter+=1            
-                    print('\r\tWorking on file #: %s' % counter, end='')
+                    print('\r\tWorking on file #: {}'.format(counter), end='')
 
                 element.clear()
                 
@@ -1226,7 +1421,7 @@ class ItemBarcode(Shipment):
                     done_list.append(file_target)
                     
                     #save this list to file just in case we crash...
-                    raw_stats = "%s | %s | %s | %s | %s | %s | %s\n" % (file_target, size, mtime, ctime, atime, checksum, counter)
+                    raw_stats = "{} | {} | {} | {} | {} | {} | {}\n".format(file_target, size, mtime, ctime, atime, checksum, counter)
                     with open(self.temp_dfxml, 'a', encoding='utf8') as f:
                         f.write(raw_stats)
             
@@ -1267,7 +1462,7 @@ class ItemBarcode(Shipment):
             tree.write(self.dfxml_output, pretty_print=True, xml_declaration=True, encoding="utf-8")      
         
         else:
-            print('\n\tERROR: %s does not appear to exist...' % target)
+            print('\n\tERROR: {} does not appear to exist...'.format(target))
             return
         
         #save stats for reporting...            
@@ -1413,7 +1608,7 @@ class ItemBarcode(Shipment):
                 audio_test = {}
                 print('\n\tChecking audio streams...')
                 for t in titlelist:
-                    cmd = "ffprobe -i %s -hide_banner -show_streams -select_streams a -loglevel error" % t
+                    cmd = "ffprobe -i {} -hide_banner -show_streams -select_streams a -loglevel error".format(t)
                     try:
                         audio_check = subprocess.check_output(cmd, shell=True, text=True)
                         audio_test[t] = audio_check
@@ -1464,7 +1659,7 @@ class ItemBarcode(Shipment):
 
     def cdda_image_creation(self):
         
-        print('\n\nDISK IMAGE CREATION: CDRDAO\n\n\tSOURCE: %s \n\tDESTINATION: %s' % (sourceDevice, image_dir))
+        print('\n\nDISK IMAGE CREATION: CDRDAO\n\n\tSOURCE: {} \n\tDESTINATION: {}'.format(self.source_device, self.image_dir))
         
         #determine appropriate drive ID for cdrdao; save output of command to temp file
         scan_cmd = 'cdrdao scanbus > {} 2>&1'.format(self.cdr_scan)
@@ -1502,7 +1697,7 @@ class ItemBarcode(Shipment):
             print('\n\tGenerating session {} of {}: {}\n\n'.format(str(x), str(sessions), cdr_bin))
             
             #create separate bin/cue for each session
-            cdr_cmd = 'cdrdao read-cd --read-raw --session %s --datafile %s --device %s --driver generic-mmc-raw -v 3 %s | tee -a %s' % (str(x), cdr_bin, drive_id, cdr_toc, cdr_log)
+            cdr_cmd = 'cdrdao read-cd --read-raw --session {} --datafile {} --device {} --driver generic-mmc-raw -v 3 {} | tee -a {}'.format(str(x), cdr_bin, drive_id, cdr_toc, cdr_log)
             
             timestamp = str(datetime.datetime.now())
             
@@ -1523,7 +1718,7 @@ class ItemBarcode(Shipment):
                 cue_info = infile.readlines()[1:]
             
             with open(cue, 'w') as outfile:
-                outfile.write('FILE "%s" BINARY\n' % os.path.basename(cdr_bin))
+                outfile.write('FILE "{}" BINARY\n'.format(os.path.basename(cdr_bin)))
             
             with open(cue, 'ab') as outfile:
                 for line in cue_info:
@@ -1563,6 +1758,811 @@ class ItemBarcode(Shipment):
         self.record_premis(timestamp, 'normalization', exitcode, paranoia_cmd, 'Transformed object to an institutionally supported preservation format (.WAV).', paranoia_ver)
         
         print('\n\tAudio normalization complete; proceed to content analysis.')
+    
+    def run_antivirus(self):
+       
+        #get version
+        cmd = 'clamscan -V'
+        av_ver = subprocess.check_output(cmd, text=True).rstrip()
+
+        av_command = 'clamscan -i -l {} --recursive {}'.format(self.virus_log, self.files_dir)  
+        
+        timestamp = str(datetime.datetime.now())
+        exitcode = subprocess.call(av_command, shell=True, text=True)
+        
+        #store virus scan results in metadata_dict
+        with open(self.virus_log, 'r') as f:
+            if "Infected files: 0" not in f.read():
+                self.metadata_dict['virus_scan_results'] = 'WARNING! Virus or malware found; see {}.'.format(self.virus_log)
+            else:
+                self.metadata_dict['virus_scan_results'] = '-'
+
+        #save metadata_dict to file, just in case
+        pickle_dump(self.temp_dir, 'metadata_dict', self.metadata_dict)
+        
+        #save preservation metadata to PREMIS
+        self.record_premis(timestamp, 'virus check', exitcode, av_command, 'Scanned files for malicious programs.', av_ver)
+        
+        print('\n\tVirus scan completed; moving on to next step...')
+
+    def run_bulkext(self):
+
+        #get bulk extractor version for premis
+        try:
+            be_ver = subprocess.check_output(['bulk_extractor', '-V'], shell=True, text=True).rstrip()
+        except subprocess.CalledProcessError as e:
+            be_ver = e.output.rstrip()
+        
+        print('\n\tScan underway...be patient!\n')
+        
+        #use default command with buklk_extractor
+        bulkext_command = 'bulk_extractor -x aes -x base64 -x elf -x exif -x gps -x hiberfile -x httplogs -x json -x kml -x net -x pdf -x sqlite -x winlnk -x winpe -x winprefetch -S ssn_mode=2 -q -1 -o "{}" -R "{}" > "{}"'.format(self.bulkext_dir, self.files_dir, self.bulkext_log)
+        
+        if os.path.exists(self.bulkext_dir):
+            shutil.rmtree(self.bulkext_dir)
+        
+        try:
+            os.makedirs(self.bulkext_dir)
+        except OSError as exception:
+            if exception.errno != errno.EEXIST:
+                raise
+
+        #create timestamp
+        timestamp = str(datetime.datetime.now())        
+
+        exitcode = subprocess.call(bulkext_command, shell=True, text=True)
+       
+        #record event in PREMIS metadata
+        self.record_premis(timestamp, 'sensitive data scan', exitcode, bulkext_command, 'Scanned files for potentially sensitive information, including Social Security and credit card numbers.', be_ver)
+        
+        #create a cumulative BE report
+        if os.path.exists(self.cumulative_be_report):
+            os.remove(self.cumulative_be_report)
+            
+        for myfile in ('pii.txt', 'ccn.txt', 'email.txt', 'telephone.txt', 'find.txt'):
+            myfile = os.path.join(self.bulkext_dir, myfile)
+            if os.path.exists(myfile) and os.stat(myfile).st_size > 0:
+                with open(myfile, 'rb') as filein:
+                    data = filein.read().splitlines()    
+                with open(self.cumulative_be_report, 'a', encoding='utf8') as outfile:
+                    outfile.write('{}: {}\n'.format(os.path.basename(myfile), len(data[5:])))
+        
+        #if no results from the above, create file so we don't throw an error later
+        if not os.path.exists(self.cumulative_be_report):         
+            open(self.cumulative_be_report, 'a').close()
+        #otherwise, move any b_e histogram files, if needed
+        else:
+            for myfile in ('email_domain_histogram.txt', 'find_histogram.txt', 'telephone_histogram.txt'):
+                current_file = os.path.join(self.bulkext_dir, myfile)
+                try:    
+                    if os.stat(current_file).st_size > 0:
+                        shutil.copy(current_file, self.reports_dir)
+                except OSError:
+                    continue
+        
+        print('\n\tSensitive data scan completed; moving on to next step...')
+    
+    def format_analysis(self):
+    
+        print('\n\tFile format identification with Siegfried...') 
+
+        format_version = subprocess.check_output('sf -version', shell=True, text=True).replace('\n', ' ')
+        
+        #remove Siegrfried report if it already exists
+        if os.path.exists(self.sf_file):
+            os.remove(self.sf_file)                                                                 
+                
+        format_command = 'sf -z -csv "{}" > "{}"'.format(self.files_dir, self.sf_file)
+        
+        #create timestamp
+        timestamp = str(datetime.datetime.now())
+        
+        exitcode = subprocess.call(format_command, shell=True, text=True)
+        
+        #if siegfried fails, then we'll run DROID
+        if exitcode != 0 and os.path.getsize(sf_file) == 0:
+            print('\n\tFile format identification with siegfried failed; now attempting with DROID...\n') 
+            
+            format_version = "DROID v{}".format(subprocess.check_output('droid -v', shell=True, text=True).strip())
+            
+            droid_cmd1 = 'droid -RAq -a "{}" -p "{}"' % (self.files_dir, self.droid_profile)
+            
+            exitcode = subprocess.call(droid_cmd1, shell=True)
+            
+            droid_cmd2 = 'droid -p "{}" -e "{}"'.format(self.droid_profile, self.droid_out)
+            
+            subprocess.call(droid_cmd2, shell=True)
+            
+            #consolidate commands for premis
+            format_command = "{} && {}".format(droid_cmd1, droid_cmd2)
+            
+            #now reformat droid output to be like sf output
+            droid_to_siegfried(self.droid_out, self.sf_file)
+        
+        #record event in PREMIS metadata
+        self.record_premis(timestamp, 'format identification', exitcode, format_command, 'Determined file format and version numbers for content using the PRONOM format registry.', format_version)
+    
+    def import_csv(self):
+
+        conn = sqlite3.connect(self.siegfried_db)
+        conn.text_factory = str  # allows utf-8 data to be stored
+        cursor = conn.cursor()
+
+        print('\n\tImporting siegried file to sqlite3 database...')
+        
+        """Import csv file into sqlite db"""
+        f = open(self.sf_file, 'r', encoding='utf8')
+        
+        try:
+            reader = csv.reader(x.replace('\0', '') for x in f) # replace null bytes with empty strings on read
+        except UnicodeDecodeError:
+            f = (x.strip() for x in f) # skip non-utf8 encodable characters
+            reader = csv.reader(x.replace('\0', '') for x in f) # replace null bytes with empty strings on read
+        header = True
+        for row in reader:
+            if header:
+                header = False # gather column names from first row of csv
+                sql = "DROP TABLE IF EXISTS siegfried"
+                cursor.execute(sql)
+                sql = "CREATE TABLE siegfried (filename text, filesize text, modified text, errors text, namespace text, id text, format text, version text, mime text, basis text, warning text)"
+                cursor.execute(sql)
+                insertsql = "INSERT INTO siegfried VALUES ({})".format(", ".join([ "?" for column in row ]))
+                rowlen = len(row)
+            else:
+                # skip lines that don't have right number of columns
+                if len(row) == rowlen:
+                    cursor.execute(insertsql, row)
+        conn.commit()
+        f.close()
+        
+        #create file to indicate that this operation has completed
+        open(self.sqlite_done, 'a').close()
+        
+        cursor.close()
+        conn.close()
+    
+    def sqlite_to_csv(self, sql, path, header, cursor):
+        """Write sql query result to csv"""
+        report = open(path, 'w', newline='', encoding='utf8')
+
+        w = csv.writer(report, lineterminator='\n')
+        w.writerow(header)
+        for row in cursor.execute(sql):
+            w.writerow(row)
+        report.close()
+    
+    def get_stats(self):
+
+        print('\n\tGetting statistics and generating reports about content...')
+        
+        #prepare sqlite database and variables
+        conn = sqlite3.connect(self.siegfried_db)
+        conn.text_factory = str  # allows utf-8 data to be stored
+        cursor = conn.cursor()
+        
+        full_header = ['Filename', 'Filesize', 'Date modified', 'Errors', 
+                    'Namespace', 'ID', 'Format', 'Format version', 'MIME type', 
+                    'Basis for ID', 'Warning']
+        
+        #retrieve our 'file stats'
+        file_stats = []
+        try:
+            with open(self.checksums, 'rb') as f:
+                file_stats = pickle.load(f)
+        except FileNotFoundError:
+            pass
+        
+        # get total # of files
+        self.num_files = len(file_stats)
+
+        # get # of empty files
+        empties = [f for f in file_stats if f['size'] in [0, '0']]
+        self.empty_files = len(empties)
+            
+        #Get stats on duplicates. Just in case the bdpl ingest tool crashes after compiling a duplicates list, we'll check to see if it already exists
+        dup_list = []
+        if os.path.exists(self.duplicates) and not self.re_analyze:
+            dup_list = pickle_load(self.temp_dir, 'ls', 'duplicates')
+        else:
+            #next, create a new dictionary that IDs checksums that correspond to 1 or more files. NOTE: the 'file_stats' list will be empty for DVDs, so we'll skip this step in that case
+            if len(file_stats) > 1:
+                stat_dict = {}
+                for dctnry in file_stats:
+                    if int(dctnry['size']) > 0:
+                        if dctnry['checksum'] in stat_dict:
+                            stat_dict[dctnry['checksum']].append(dctnry['name'])
+                        else:
+                            stat_dict[dctnry['checksum']] = [dctnry['name']]
+               
+                #go through new dict and find checksums with duplicates
+                for chksm in [key for key, values in stat_dict.items() if len(values) > 1]:
+                    for fname in stat_dict[chksm]:
+                        temp = [item for item in file_stats if item['checksum'] == chksm and item['name'] == fname][0]
+                        dup_list.append([temp['name'], temp['size'], temp['mtime'], temp['checksum']])
+                
+            #save this duplicate file for later when we need to write to html
+            pickle_dump(self.temp_dir, 'duplicates', dup_list)
+        
+        #total duplicates = total length of duplicate list
+        self.all_dupes = len(dup_list)
+
+        #distinct duplicates = # of unique checksums in the duplicates list
+        self.distinct_dupes = len(set([c[3] for c in dup_list]))
+
+        #duplicate copies = # of unique files that may have one or more copies
+        duplicate_copies = int(all_dupes) - int(distinct_dupes) # number of duplicate copies of unique files
+        self.duplicate_copies = str(duplicate_copies)
+        
+        distinct_files = int(num_files) - int(duplicate_copies)
+        self.distinct_files = str(distinct_files)
+        
+        # generate sorted format list report; add top formats to metadata_dict
+        path = os.path.join(reports_dir, 'formats.csv')
+        sql = "SELECT format, id, COUNT(*) as 'num' FROM siegfried GROUP BY format ORDER BY num DESC"
+        format_header = ['Format', 'ID', 'Count']
+        self.sqlite_to_csv(sql, path, format_header, cursor)
+        
+        fileformats = []
+        formatcount = 0
+        try:
+            with open(path, 'r') as csvfile:
+                formatreader = csv.reader(csvfile)
+                next(formatreader)
+                for row in formatreader:
+                    formatcount += 1
+                    fileformats.append(row[0])
+                fileformats = [element or 'Unidentified' for element in fileformats] # replace empty elements with 'Unidentified'
+                if formatcount > 0:
+                    self.metadata_dict['format_overview'] = "Top file formats (out of {} total) are: {}".format(formatcount, ' | '.join(fileformats[:10]))
+                else:
+                    self.metadata_dict['format_overview'] = "-"
+                
+        except IOError:
+            self.metadata_dict['format_overview'] = "ERROR! No formats.csv file to pull formats from."
+        
+        # generate sorted format and version list report
+        path = os.path.join(reports_dir, 'formatVersions.csv')
+        sql = "SELECT format, id, version, COUNT(*) as 'num' FROM siegfried GROUP BY format, version ORDER BY num DESC"
+        version_header = ['Format', 'ID', 'Version', 'Count']
+        self.sqlite_to_csv(sql, path, version_header, cursor)
+        
+        # get # of unidentified files and write list to CSV
+        sql = "SELECT * FROM siegfried WHERE id='UNKNOWN';"
+        cursor.execute(sql)
+        self.unidentified_files = cursor.fetchone()[0]
+        path = os.path.join(reports_dir, 'unidentified.csv')
+        self.sqlite_to_csv(sql, path, full_header, cursor)
+        
+        # get sorted mimetype list report
+        path = os.path.join(reports_dir, 'mimetypes.csv')
+        sql = "SELECT mime, COUNT(*) as 'num' FROM siegfried GROUP BY mime ORDER BY num DESC"
+        mime_header = ['MIME type', 'Count']
+        self.sqlite_to_csv(sql, path, mime_header, cursor)
+        
+        #for dvd jobs, we need to use disk image metadata for dates...
+        if self.job_type == 'DVD':
+            try:
+                with open(self.checksums_dvd, 'rb') as f:
+                    file_stats = pickle.load(f)
+            except FileNotFoundError:
+                pass
+                
+        #For reporting purposes, we want to catch any files whose current 'mtime' was set to the replication in the BDPL process.
+        premis_list = pickle_load(self.temp_dir, 'ls', 'premis_list')
+        
+        #first, establish when we ran the replication operation.  If no replication operation, check timestamp of folders we created
+        try:
+            bdpl_time = [p for p in premis_list if p['eventType'] == 'replication'][0]['timestamp'].split('.')[0].replace('T', ' ')
+        except IndexError:
+            bdpl_time = datetime.datetime.fromtimestamp(os.path.getmtime(self.folders_created)).isoformat().replace('T', ' ').split('.')[0]
+        
+        bdpl_time = datetime.datetime.strptime(bdpl_time, "%Y-%m-%d %H:%M:%S")
+        
+        #next, go through or file list.  If the 'mtime' is more recent than the 'BDPL' replication action, that means we don't have the original file timestamp.  Only record older/original dates in a date_info list
+        date_info = []
+        undated_count = []
+        if len(file_stats) > 0:
+            for dctnry in file_stats:
+                dt_time = dctnry['mtime'].replace('T', ' ').split('.')[0]
+                dt_time = datetime.datetime.strptime(dt_time, "%Y-%m-%d %H:%M:%S")
+                if dt_time < bdpl_time:
+                    date_info.append(dctnry['mtime'])
+                else:
+                    undated_count.append('undated')
+            
+        #If we've collected any dates in our date_info list, set date ranges and then record years in separate list
+        if len(date_info) > 0:
+            self.begin_date = min(date_info)[:4]
+            self.end_date = max(date_info)[:4]
+            self.earliest_date = min(date_info)
+            self.latest_date = max(date_info)   
+            
+            year_info = [x[:4] for x in date_info]
+            
+        #if date_info is empty, record 'undated' for date ranges
+        else:
+            self.begin_date = "undated"
+            self.end_date = "undated"
+            self.earliest_date = "undated"
+            self.latest_date = "undated"
+            
+            year_info = undated_count
+            
+        #get frequency of each year for report       
+        self.year_count = dict(Counter(year_info))
+        
+        #write year info to file
+        path = os.path.join(self.reports_dir, 'years.csv')    
+        with open(path, 'w', newline='') as f:
+            writer = csv.writer(f)
+            year_header = ['Year Last Modified', 'Count']
+            writer.writerow(year_header)
+            if len(year_count) > 0:
+                for key, value in year_count.items():
+                    writer.writerow([key, value])
+
+        # get number of identfied file formats
+        cursor.execute("SELECT COUNT(DISTINCT format) as formats from siegfried WHERE format <> '';")
+        self.num_formats = cursor.fetchone()[0]
+
+        # get number of siegfried errors and write errors to csv
+        sql = "SELECT * FROM siegfried WHERE errors <> '';"
+        cursor.execute(sql)
+        self.num_errors = cursor.fetchone()[0]
+        path = os.path.join(self.reports_dir, 'errors.csv')
+        self.sqlite_to_csv(sql, path, full_header, cursor)
+
+        # calculate size from recursive dirwalk and format
+        self.total_size_bytes = 0
+        for root, dirs, files in os.walk(self.files_dir):
+            for f in files:
+                file_path = os.path.join(root, f)
+                file_info = os.stat(file_path)
+                self.total_size_bytes += file_info.st_size
+
+        self.total_size = convert_size(self.total_size_bytes)
+        
+        # close database connections
+        cursor.close()
+        conn.close()
+        
+        #save information to metadata_dict     
+        self.metadata_dict.update({'Source': self.item_barcode, 'begin_date': self.begin_date, 'end_date' : self.end_date, 'extent_normal': self.total_size, 'extent_raw': self.total_size_bytes, 'item_file_count': self.num_files, 'item_duplicate_count': self.distinct_dupes, 'FormatCount': self.num_formats, 'item_unidentified_count': self.unidentified_files})  
+        
+        #get additional metadata from PREMIS about transfer
+        premis_list = pickle_load(self.temp_dir, 'ls', 'premis_list')
+        
+        if self.job_type in ['Disk_image', 'DVD', 'CDDA']:
+            try:
+                temp_dict = [f for f in premis_list if f['eventType'] == 'disk image creation'][-1]
+            except IndexError:
+                try: 
+                    temp_dict = [f for f in premis_list if f['eventType'] == 'normalization'][-1]
+                except IndexError:
+                    temp_dict = {'linkingAgentIDvalue' : '-', 'timestamp' : '-', 'eventOutcomeDetail' : 'Operation not completed.'}
+        elif self.job_type == 'Copy_only':
+            try:
+                temp_dict = [f for f in premis_list if f['eventType'] == 'replication'][-1]
+            except IndexError:
+                temp_dict = {'linkingAgentIDvalue' : '-', 'timestamp' : '-', 'eventOutcomeDetail' : 'Operation not completed.'}
+        
+        self.metadata_dict['job_type'] = self.job_type
+        self.metadata_dict['transfer_method'] = temp_dict['linkingAgentIDvalue']
+        self.metadata_dict['migration_date'] = temp_dict['timestamp']
+        
+        if temp_dict['eventOutcomeDetail'] == '0' or temp_dict['eventOutcomeDetail'] == 0:
+            self.metadata_dict['migration_outcome'] = 'Success'
+        else:
+            self.metadata_dict['migration_outcome'] = 'Failure'
+        
+        #if using the GUI ingest tool, update any notes provided by technician
+        if self.controller.get_current_tab() == 'BDPL Ingest':
+            self.metadata_dict['technician_note'] = self.controller.bdpl_technician_note.get(1.0, END)
+        
+        #add linked information
+        self.metadata_dict['full_report'] = '=HYPERLINK(".\\{}\\metadata\\reports\\report.html", "View report")'.format(self.item_barcode)
+        self.metadata_dict['transfer_link'] = '=HYPERLINK("{}", "View transfer folder")'.format(self.item_barcode)
+        
+        try:
+            if self.metadata_dict['initial_appraisal'] in ["No appraisal needed", "Move to SDA", "Transfer to SDA"]:
+                self.metadata_dict['final_appraisal'] = "Transfer to SDA"
+            elif self.metadata_dict['initial_appraisal'] == 'Move to SDA and MCO':
+                self.metadata_dict['final_appraisal'] = 'Transfer to SDA and MCO'
+            elif self.metadata_dict['initial_appraisal'] == '-':
+                del self.metadata_dict['final_appraisal']
+        except KeyError:
+            pass
+        
+        #save metadata_dict to file just in case...
+        pickle_dump(self.temp_dir, 'metadata_dict', self.metadata_dict)
+        
+        #create temp file so we can check that this step was already completed
+        open(os.path.join(self.temp_dir, 'stats_done.txt', 'a')).close()
+    
+    def generate_html(self):
+    
+        print('\n\tCreating HTML...')
+        
+        #set up html for report
+        html_doc = open(self.temp_html, 'w', encoding='utf8') 
+        
+        # write html
+        html_doc.write('<!DOCTYPE html>')
+        html_doc.write('\n<html lang="en">')
+        html_doc.write('\n<head>')
+        html_doc.write('\n<title>IUL Born Digital Preservation Lab report: {}</title>'.format(self.item_barcode))
+        html_doc.write('\n<meta http-equiv="Content-Type" content="text/html; charset=utf-8">')
+        html_doc.write('\n<meta name="description" content="HTML report based upon a template developed by Tim Walsh and distributed as part of Brunnhilde v. 1.7.2">')
+        html_doc.write('\n<link rel="stylesheet" href="./assets//css/bootstrap.min.css">')
+        html_doc.write('\n</head>')
+        html_doc.write('\n<body style="padding-top: 80px">')
+        # navbar
+        html_doc.write('\n<nav class="navbar navbar-expand-lg navbar-dark bg-dark fixed-top">')
+        html_doc.write('\n<a class="navbar-brand" href="#">Brunnhilde</a>')
+        html_doc.write('\n<button class="navbar-toggler" type="button" data-toggle="collapse" data-target="#navbarNavAltMarkup" aria-controls="navbarNavAltMarkup" aria-expanded="false" aria-label="Toggle navigation">')
+        html_doc.write('\n<span class="navbar-toggler-icon"></span>')
+        html_doc.write('\n</button>')
+        html_doc.write('\n<div class="collapse navbar-collapse" id="navbarNavAltMarkup">')
+        html_doc.write('\n<div class="navbar-nav">')
+        html_doc.write('\n<a class="nav-item nav-link" href="#Provenance">Provenance</a>')
+        html_doc.write('\n<a class="nav-item nav-link" href="#Stats">Statistics</a>')
+        html_doc.write('\n<a class="nav-item nav-link" href="#File formats">File formats</a>')
+        html_doc.write('\n<a class="nav-item nav-link" href="#File format versions">Versions</a>')
+        html_doc.write('\n<a class="nav-item nav-link" href="#MIME types">MIME types</a>')
+        html_doc.write('\n<a class="nav-item nav-link" href="#Last modified dates by year">Dates</a>')
+        html_doc.write('\n<a class="nav-item nav-link" href="#Unidentified">Unidentified</a>')
+        html_doc.write('\n<a class="nav-item nav-link" href="#Errors">Errors</a>')
+        html_doc.write('\n<a class="nav-item nav-link" href="#Duplicates">Duplicates</a>')
+        html_doc.write('\n<a class="nav-item nav-link" href="#Personally Identifiable Information (PII)">PII</a>')
+        html_doc.write('\n<a class="nav-item nav-link" href="#Named Entities">Named Entities</a>')
+        html_doc.write('\n</div>')
+        html_doc.write('\n</div>')
+        html_doc.write('\n</nav>')
+        # content
+        html_doc.write('\n<div class="container-fluid">')
+        html_doc.write('\n<h1 style="text-align: center; margin-bottom: 40px;">IUL BDPL Brunnhilde HTML report</h1>')
+        # provenance
+        html_doc.write('\n<a name="Provenance" style="padding-top: 40px;"></a>')
+        html_doc.write('\n<div class="container-fluid" style="margin-bottom: 40px;">')
+        html_doc.write('\n<div class="card">')
+        html_doc.write('\n<h2 class="card-header">Provenance</h2>')
+        html_doc.write('\n<div class="card-body">')
+        '''need to check if disk image or not'''
+        if self.job_type == 'Copy_only':
+            html_doc.write('\n<p><strong>Input source: File directory</strong></p>')
+        elif self.job_type == 'DVD':
+            html_doc.write('\n<p><strong>Input source: DVD-Video (optical disc)</strong></p>')
+        elif self.job_type == 'CDDA':
+            html_doc.write('\n<p><strong>Input source: Compact Disc Digital Audio</strong></p>')
+        elif self.job_type == 'Disk_image':
+            html_doc.write('\n<p><strong>Input source: Physical media</strong></p>')
+            
+        html_doc.write('\n<p><strong>Item identifier:</strong> {}</p>'.format(self.item_barcode))
+        html_doc.write('\n</div>')
+        html_doc.write('\n</div>')
+        html_doc.write('\n</div>')
+        # statistics
+        html_doc.write('\n<a name="Stats" style="padding-top: 40px;"></a>')
+        html_doc.write('\n<div class="container-fluid" style="margin-bottom: 40px;">')
+        html_doc.write('\n<div class="card">')
+        html_doc.write('\n<h2 class="card-header">Statistics</h2>')
+        html_doc.write('\n<div class="card-body">')
+        html_doc.write('\n<h4>Overview</h4>')
+        html_doc.write('\n<p><strong>Total files:</strong> {} (includes contents of archive files)</p>'.format(self.num_files))
+        html_doc.write('\n<p><strong>Total size:</strong> {}</p>'.format(self.total_size))
+        html_doc.write('\n<p><strong>Years (last modified):</strong> {} - {}</p>'.format(self.begin_date, self.end_date))
+        html_doc.write('\n<p><strong>Earliest date:</strong> {}</p>'.format(self.earliest_date))
+        html_doc.write('\n<p><strong>Latest date:</strong> {}</p>'.format(self.latest_date))
+        html_doc.write('\n<h4>File counts and contents</h4>')
+        html_doc.write('\n<p><em>Calculated by hash value. Empty files are not counted in first three categories. Total files = distinct + duplicate + empty files.</em></p>')
+        html_doc.write('\n<p><strong>Distinct files:</strong> {}</p>'.format(self.distinct_files))
+        html_doc.write('\n<p><strong>Distinct files with duplicates:</strong> {}</p>'.format(self.distinct_dupes))
+        html_doc.write('\n<p><strong>Duplicate files:</strong> {}</p>'.format(self.duplicate_copies))
+        html_doc.write('\n<p><strong>Empty files:</strong> {}</p>'.format(self.empty_files))
+        html_doc.write('\n<h4>Format identification</h4>')
+        html_doc.write('\n<p><strong>Identified file formats:</strong> {}</p>'.format(self.num_formats))
+        html_doc.write('\n<p><strong>Unidentified files:</strong> {}</p>'.format(self.unidentified_files))
+        html_doc.write('\n<h4>Errors</h4>')
+        html_doc.write('\n<p><strong>Siegfried errors:</strong> {}</p>'.format(self.num_errors))
+        html_doc.write('\n<h2>Virus scan report</h2>')
+        with open(self.virus_log, 'r', encoding='utf-8') as f:
+            virus_report = f.read().splitlines()
+        html_doc.write('\n<p>')
+        for line in virus_report:
+            html_doc.write('\n{}'.format(line))
+        html_doc.write('\n</p>')
+        html_doc.write('\n</div>')
+        html_doc.write('\n</div>')
+        html_doc.write('\n</div>')
+        # detailed reports
+        html_doc.write('\n<div class="container-fluid" style="margin-bottom: 40px;">')
+        html_doc.write('\n<div class="card">')
+        html_doc.write('\n<h2 class="card-header">Detailed reports</h2>')
+        html_doc.write('\n<div class="card-body">')
+        
+        #now write reports to HTML
+        report_info = {'File formats' : {'path' : os.path.join(self.reports_dir, 'formats.csv'), 'delimiter' : ','}, 'File format versions' : {'path' : os.path.join(self.reports_dir, 'formatVersions.csv'), 'delimiter' : ','}, 'MIME types' : {'path' : os.path.join(self.reports_dir, 'mimetypes.csv'), 'delimiter' : ','}, 'Last modified dates by year' : {'path' : os.path.join(self.reports_dir, 'years.csv'), 'delimiter' : ','}, 'Unidentified' : {'path' : os.path.join(self.reports_dir, 'unidentified.csv'), 'delimiter' : ','}, 'Errors' : {'path' : os.path.join(self.reports_dir, 'errors.csv'), 'delimiter' : ','}, 'Duplicates' : {'path' : pickle_load(self.temp_dir, 'ls', 'duplicates'), 'delimiter' : ','}, 'Personally Identifiable Information (PII)' : {'path' : os.path.join(self.bulkext_dir, 'cumulative.txt'), 'delimiter' : '\n'}}
+        
+        for header, info in report_info.items():
+            self.reports_to_html(header, info['path'], info['delimiter'], html_doc)
+            
+        # close HTML file
+        html_doc.close()
+
+        # write new html file, with hrefs for PRONOM IDs           
+        if os.path.exists(self.new_html):
+            os.remove(self.new_html)
+
+        # insert pronom links in HTML
+        in_file = open(self.temp_html, 'r', encoding='utf8')
+        out_file = open(self.new_html, 'w', encoding='utf8')
+
+        for line in in_file:
+            regex = r"fmt\/[0-9]+|x\-fmt\/[0-9]+" #regex to match fmt/# or x-fmt/#
+            pronom_links_to_replace = re.findall(regex, line)
+            new_line = line
+            for match in pronom_links_to_replace:
+                new_line = line.replace(match, "<a href=\"http://nationalarchives.gov.uk/PRONOM/" + 
+                        match + "\" target=\"_blank\">" + match + "</a>")
+                line = new_line # allow for more than one match per line
+            out_file.write(new_line)
+
+        in_file.close()
+        out_file.close()
+    
+    def reports_to_html(self, header, path, file_delimiter, html_doc):
+        """Write csv file to html table"""
+
+        # write header
+        html_doc.write('\n<a name="{}" style="padding-top: 40px;"></a>'.format(header))
+        html_doc.write('\n<h4>{}</h4>'.format(header))
+        
+        if header == 'Duplicates':
+            html_doc.write('\n<p><em>Duplicates are grouped by hash value.</em></p>')
+            dup_list = path
+            numline = len(dup_list)
+            
+            if numline > 1: #aka more rows than just header
+                # read md5s from csv and write to list
+                hash_list = []
+                for row in dup_list:
+                    hash_list.append(row[3])
+                # deduplicate md5_list
+                hash_list = list(OrderedDict.fromkeys(hash_list))
+                # for each hash in md5_list, print header, file info, and list of matching files
+                for hash_value in hash_list:
+                    html_doc.write('\n<p>Files matching checksum <strong>{}</strong>:</p>'.format(hash_value))
+                    html_doc.write('\n<table class="table table-sm table-responsive table-bordered table-hover">')
+                    html_doc.write('\n<thead>')
+                    html_doc.write('\n<tr>')
+                    html_doc.write('\n<th>Filename</th><th>Filesize</th>')
+                    html_doc.write('<th>Date modified</th>')
+                    html_doc.write('<th>Checksum</th>')
+                    html_doc.write('\n</tr>')
+                    html_doc.write('\n</thead>')
+                    html_doc.write('\n<tbody>')
+                    for row in dup_list:
+                        if row[3] == hash_value:
+                            # write data
+                            html_doc.write('\n<tr>')
+                            for column in row:
+                                html_doc.write('\n<td>' + str(column) + '</td>')
+                            html_doc.write('\n</tr>')
+                    html_doc.write('\n</tbody>')
+                    html_doc.write('\n</table>')
+            
+                #save a copy of the duplicates for the reports
+                dup_report = os.path.join(self.reports_dir, 'duplicates.csv')
+                with open(dup_report, "w", newline="", encoding='utf-8') as f:
+                    writer = csv.writer(f)
+                    dup_header = ['Filename', 'Filesize', 'Date modified', 'Checksum']
+                    writer.writerow(dup_header)
+                    for item in dup_list:
+                        writer.writerow(item)
+            else:
+                html_doc.write('\nNone found.\n<br><br>')
+            
+        else:
+            in_file = open(path, 'r', encoding="utf-8")
+            # count lines and then return to start of file
+            numline = len(in_file.readlines())
+            in_file.seek(0)
+
+            #open csv reader
+            r = csv.reader(in_file, delimiter="{}".format(file_delimiter))
+            
+            # if writing PII, handle separately
+            if header == 'Personally Identifiable Information (PII)':
+                html_doc.write('\n<p><em>Potential PII in source, as identified by bulk_extractor.</em></p>')  
+                pii_list = []
+
+                #check that there are any PII results.  Set value to begin; we will add any found values
+                self.metadata_dict['pii_scan_results'] = '-'
+                
+                if os.stat(path).st_size > 0:
+                    html_doc.write('\n<table class="table table-sm table-responsive table-hover">')
+                    html_doc.write('\n<thead>')
+                    html_doc.write('\n<tr>')
+                    html_doc.write('\n<th>PII type</th>')
+                    html_doc.write('\n<th># of matches (may be false)</th>')
+                    html_doc.write('\n<th>More information (if available)</th>')
+                    html_doc.write('\n</tr>')
+                    html_doc.write('\n</thead>')
+                    html_doc.write('\n<tbody>')
+                    with open(path, 'r') as pii_info:
+                        for line in pii_info:
+                            html_doc.write('\n<tr>')
+                            if 'pii.txt' in line:
+                                # write data
+                                html_doc.write('\n<td>SSNs, Account Nos., Birth Dates, etc.</td>')
+                                html_doc.write('\n<td>' + line.split()[1] + '</td>')
+                                html_doc.write('\n<td>Use BE_Viewer to verify results; report.xml file located at: {}.</td>'.format(self.bulkext_dir))
+                                pii_list.append('ACCOUNT NOs')
+                            if 'ccn.txt' in line:
+                                html_doc.write('\n<td>Credit Card Nos.</td>')
+                                html_doc.write('\n<td>' + line.split()[1] + '</td>')
+                                html_doc.write('\n<td>Use BE_Viewer to verify results; report.xml file located at: {}.</td>'.format(self.bulkext_dir))
+                                pii_list.append('CCNs')
+                            if 'email.txt' in line:
+                                html_doc.write('\n<td>Email address domains (may include 3rd party information)</td>')
+                                html_doc.write('\n<td>' + line.split()[1] + '</td>')
+                                html_doc.write('\n<td>See: <a href="./email_domain_histogram.txt">Email domain histogram</a></td>')
+                                pii_list.append('EMAIL')
+                            if 'telephone.txt' in line:
+                                html_doc.write('\n<td>Telephone numbers (may include 3rd party information)</td>')
+                                html_doc.write('\n<td>' + line.split()[1] + '</td>')
+                                html_doc.write('\n<td>See: <a href="./telephone_histogram.txt">Telephone # histogram</a></td>')
+                                pii_list.append('TELEPHONE NOs')
+                            if 'find.txt' in line:
+                                html_doc.write('\n<td>Sensitive terms and phrases</td>')
+                                html_doc.write('\n<td>' + line.split()[1] + '</td>')
+                                html_doc.write('\n<td>See: <a href="./find_histogram.txt">Keyword histogram</a></td>')
+                                pii_list.append('TERMS')
+                            html_doc.write('\n</tr>')   
+                    html_doc.write('\n</tbody>')
+                    html_doc.write('\n</table>')
+                    
+                    if len(pii_list) > 0:
+                        self.metadata_dict['pii_scan_results'] = '{}.'.format(', '.join(pii_list))
+            
+                else:
+                    html_doc.write('\nNone found.')
+                
+                pickle_dump(self.temp_dir, 'metadata_dict', self.metadata_dict)
+
+            # otherwise write as normal
+            else:
+                if numline > 1: #aka more rows than just header
+                    # add borders to table for full-width tables only
+                    full_width_table_headers = ['Unidentified', 'Errors']
+                    if header in full_width_table_headers:
+                        html_doc.write('\n<table class="table table-sm table-responsive table-bordered table-hover">')
+                    else:
+                        html_doc.write('\n<table class="table table-sm table-responsive table-hover">')
+                    # write header row
+                    html_doc.write('\n<thead>')
+                    html_doc.write('\n<tr>')
+                    row1 = next(r)
+                    for column in row1:
+                        html_doc.write('\n<th>' + str(column) + '</th>')
+                    html_doc.write('\n</tr>')
+                    html_doc.write('\n</thead>')
+                    # write data rows
+                    html_doc.write('\n<tbody>')
+                    for row in r:
+                        # write data
+                        html_doc.write('\n<tr>')
+                        for column in row:
+                            html_doc.write('\n<td>' + str(column) + '</td>')
+                        html_doc.write('\n</tr>')
+                    html_doc.write('\n</tbody>')
+                    html_doc.write('\n</table>')
+                else:
+                    html_doc.write('\nNone found.\n<br><br>')
+        
+            in_file.close()
+    
+    def print_premis(self):   
+    
+        premis_list = pickle_load(self.temp_dir, 'ls', 'premis_list')
+        
+        attr_qname = etree.QName("http://www.w3.org/2001/XMLSchema-instance", "schemaLocation")
+
+        PREMIS_NAMESPACE = "http://www.loc.gov/premis/v3"
+
+        PREMIS = "{%s}" % PREMIS_NAMESPACE
+
+        NSMAP = {'premis' : PREMIS_NAMESPACE,
+                "xsi": "http://www.w3.org/2001/XMLSchema-instance"}
+
+        events = []
+        
+        #if our premis file already exists, we'll just delete it and write a new one
+        if os.path.exists(self.premis_path):
+            os.remove(self.premis_path)
+            
+        root = etree.Element(PREMIS + 'premis', {attr_qname: "http://www.loc.gov/premis/v3 https://www.loc.gov/standards/premis/premis.xsd"}, version="3.0", nsmap=NSMAP)
+        
+        object = etree.SubElement(root, PREMIS + 'object', attrib={etree.QName(NSMAP['xsi'], 'type'): 'premis:file'})
+        objectIdentifier = etree.SubElement(object, PREMIS + 'objectIdentifier')
+        objectIdentifierType = etree.SubElement(objectIdentifier, PREMIS + 'objectIdentifierType')
+        objectIdentifierType.text = 'local'
+        objectIdentifierValue = etree.SubElement(objectIdentifier, PREMIS + 'objectIdentifierValue')
+        objectIdentifierValue.text = self.item_barcode
+        objectCharacteristics = etree.SubElement(object, PREMIS + 'objectCharacteristics')
+        compositionLevel = etree.SubElement(objectCharacteristics, PREMIS + 'compositionLevel')
+        compositionLevel.text = '0'
+        format = etree.SubElement(objectCharacteristics, PREMIS + 'format')
+        formatDesignation = etree.SubElement(format, PREMIS + 'formatDesignation')
+        formatName = etree.SubElement(formatDesignation, PREMIS + 'formatName')
+        formatName.text = 'Tape Archive Format'
+        formatRegistry = etree.SubElement(format, PREMIS + 'formatRegistry')
+        formatRegistryName = etree.SubElement(formatRegistry, PREMIS + 'formatRegistryName')
+        formatRegistryName.text = 'PRONOM'
+        formatRegistryKey = etree.SubElement(formatRegistry, PREMIS + 'formatRegistryKey')
+        formatRegistryKey.text = 'x-fmt/265' 
+
+        for entry in premis_list:
+            event = etree.SubElement(root, PREMIS + 'event')
+            eventID = etree.SubElement(event, PREMIS + 'eventIdentifier')
+            eventIDtype = etree.SubElement(eventID, PREMIS + 'eventIdentifierType')
+            eventIDtype.text = 'UUID'
+            eventIDval = etree.SubElement(eventID, PREMIS + 'eventIdentifierValue')
+            eventIDval.text = str(uuid.uuid4())
+
+            eventType = etree.SubElement(event, PREMIS + 'eventType')
+            eventType.text = entry['eventType']
+
+            eventDateTime = etree.SubElement(event, PREMIS + 'eventDateTime')
+            eventDateTime.text = entry['timestamp']
+
+            eventDetailInfo = etree.SubElement(event, PREMIS + 'eventDetailInformation')
+            eventDetail = etree.SubElement(eventDetailInfo, PREMIS + 'eventDetail')
+            eventDetail.text = entry['eventDetailInfo']
+            
+            #include additional eventDetailInfo to clarify action; older transfers may not include this element, so skip if KeyError
+            try:
+                eventDetailInfo = etree.SubElement(event, PREMIS + 'eventDetailInformation')
+                eventDetail = etree.SubElement(eventDetailInfo, PREMIS + 'eventDetail')
+                eventDetail.text = entry['eventDetailInfo_additional']
+            except KeyError:
+                pass
+                
+            eventOutcomeInfo = etree.SubElement(event, PREMIS + 'eventOutcomeInformation')
+            eventOutcome = etree.SubElement(eventOutcomeInfo, PREMIS + 'eventOutcome')
+            eventOutcome.text = str(entry['eventOutcomeDetail'])
+            eventOutDetail = etree.SubElement(eventOutcomeInfo, PREMIS + 'eventOutcomeDetail')
+            eventOutDetailNote = etree.SubElement(eventOutDetail, PREMIS + 'eventOutcomeDetailNote')
+            if entry['eventOutcomeDetail'] == '0':
+                eventOutDetailNote.text = 'Successful completion'
+            elif entry['eventOutcomeDetail'] == 0:
+                eventOutDetailNote.text = 'Successful completion'
+            else:
+                eventOutDetailNote.text = 'Unsuccessful completion; refer to logs.'
+
+            linkingAgentID = etree.SubElement(event, PREMIS + 'linkingAgentIdentifier')
+            linkingAgentIDtype = etree.SubElement(linkingAgentID, PREMIS + 'linkingAgentIdentifierType')
+            linkingAgentIDtype.text = 'local'
+            linkingAgentIDvalue = etree.SubElement(linkingAgentID, PREMIS + 'linkingAgentIdentifierValue')
+            linkingAgentIDvalue.text = 'IUL BDPL'
+            linkingAgentRole = etree.SubElement(linkingAgentID, PREMIS + 'linkingAgentRole')
+            linkingAgentRole.text = 'implementer'
+            linkingAgentID = etree.SubElement(event, PREMIS + 'linkingAgentIdentifier')
+            linkingAgentIDtype = etree.SubElement(linkingAgentID, PREMIS + 'linkingAgentIdentifierType')
+            linkingAgentIDtype.text = 'local'
+            linkingAgentIDvalue = etree.SubElement(linkingAgentID, PREMIS + 'linkingAgentIdentifierValue')
+            linkingAgentIDvalue.text = entry['linkingAgentIDvalue']
+            linkingAgentRole = etree.SubElement(linkingAgentID, PREMIS + 'linkingAgentRole')
+            linkingAgentRole.text = 'executing software'
+            linkingObjectID = etree.SubElement(event, PREMIS + 'linkingObjectIdentifier')
+            linkingObjectIDtype = etree.SubElement(linkingObjectID, PREMIS + 'linkingObjectIdentifierType')
+            linkingObjectIDtype.text = 'local'
+            linkingObjectIDvalue = etree.SubElement(linkingObjectID, PREMIS + 'linkingObjectIdentifierValue')
+            linkingObjectIDvalue.text = self.item_barcode
+        
+        premis_tree = etree.ElementTree(root)
+        
+        premis_tree.write(premis_path, pretty_print=True, xml_declaration=True, encoding="utf-8")
     
     def record_premis(self, timestamp, event_type, event_outcome, event_detail, event_detail_note, agent_id):
         
@@ -1610,13 +2610,39 @@ class ItemBarcode(Shipment):
 
         #now save our premis list
         pickle_dump(self.temp_dir, 'premis_list', premis_list)
+        
+    def check_premis(self, term):
+        #check to see if an event is already in our premis list--i.e., it's been successfully completed.  Currently only used for most resource-intensive operations: virus scheck, sensitive data scan, format id, and checksum calculation.
+        
+        #set up premis_list
+        premis_list = pickle_load(self.temp_dir, 'ls', 'premis_list')
+        
+        #see if term has been recorded at all
+        found = [dic for dic in premis_list if dic['eventType'] == term]
+        
+        #if not recorded, it hasn't been run
+        if not found: 
+            return False
+        else:
+            #for virus scans, we will assume that completion may have either a 0 or non-zero value.  No need to run again.
+            if term == 'virus check':
+                return True
+            elif term == 'metadata extraction':
+                if [dc for dc in found if 'tree v1.7.0' in dc['linkingAgentIDvalue']]:
+                    return True
+            #for other microservices, check if operation completed successfully; if so, return True, otherwise False
+            else:
+                if [dc for dc in found if dc['eventOutcomeDetail'] in ['0', 0]]:
+                    return True
+                else:
+                    return False
  
 class Spreadsheet(Shipment):
     def __init__(self, controller):
         Shipment.__init__(self, controller)
         
         self.controller = controller        
-        self.barcode_target = self.controller.item_barcode.get()
+        self.item_barcode = self.controller.item_barcode.get()
     
     def open_wb(self):
         self.wb = openpyxl.load_workbook(self.spreadsheet)
@@ -1639,7 +2665,7 @@ class Spreadsheet(Shipment):
         #if barcode exists in spreadsheet, set variable to that row
         for cell in self.inv_ws['A']:
             if (cell.value is not None):
-                if self.barcode_target == str(cell.value).strip():
+                if self.item_barcode == str(cell.value).strip():
                     row = cell.row
                     found = True
                     break
@@ -1652,7 +2678,7 @@ class Spreadsheet(Shipment):
 
         for cell in self.app_ws['A']:
             if (cell.value is not None):
-                if self.barcode_target == str(cell.value).strip():
+                if self.item_barcode == str(cell.value).strip():
                     row = cell.row
                     found = True
                     break   
@@ -1735,576 +2761,20 @@ class Spreadsheet(Shipment):
         
         return spreadsheet_columns
         
-class IngestJob:
-    def __init__(self, controller, current_barcode_item):
-        
-        self.controller = controller
-       
-        self.barcode_item = current_barcode_item
-        
-        self.job_type = self.controller.job_type.get()
-        self.process_type = self.controller.get_current_tab()
-        
-        if 'bdpl_transfer_list' in self.path_to_content:
-            self.path_to_content = os.path.join(self.path_to_content.replace('/', '\\'), '{}.txt'.format(self.item_barcode))
-        else:
-            self.path_to_content = self.controller.path_to_content.get().replace('/', '\\')
-        self.source_device = self.controller.source_device.get()
-        self.other_device = self.controller.other_device.get()
-        self.disk_525_type = self.controller.disk_525_type.get()
-        self.re_analyze = self.controller.re_analyze.get()
-        self.bdpl_failure_notification = self.controller.bdpl_failure_notification.get()
-        self.media_attached = self.controller.media_attached.get()
-        
-        self.disk_type_options = { 'Apple DOS 3.3 (16-sector)' : 'apple33', 'Apple DOS 3.2 (13-sector)' : 'apple32', 'Apple ProDOS' : 'applepro', 'Commodore 1541' : 'c1541', 'TI-99/4A 90k' : 'ti99', 'TI-99/4A 180k' : 'ti99ds180', 'TI-99/4A 360k' : 'ti99ds360', 'Atari 810' : 'atari810', 'MS-DOS 1200k' : 'msdos12', 'MS-DOS 360k' : 'msdos360', 'North Star MDS-A-D 175k' : 'mdsad', 'North Star MDS-A-D 350k' : 'mdsad350', 'Kaypro 2 CP/M 2.2' : 'kaypro2', 'Kaypro 4 CP/M 2.2' : 'kaypro4', 'CalComp Vistagraphics 4500' : 'vg4500', 'PMC MicroMate' : 'pmc', 'Tandy Color Computer Disk BASIC' : 'coco', 'Motorola VersaDOS' : 'versa' }
-        
+    def write_to_spreadsheet(self, metadata_dict):
     
-
+        status, current_row = self.return_appraisal_row()
+        
+        ws_cols = self.get_spreadsheet_columns(self.app_ws)
     
-    
-    
-    
-            
-    
-    
-    
-    
-    def run_antivirus(self):
-       
-        #get version
-        cmd = 'clamscan -V'
-        av_ver = subprocess.check_output(cmd, text=True).rstrip()
+        for key in ws_cols.keys():
+            if key in metadata_dict:
+                app_ws.cell(row=current_row, column=ws_cols[key], value=metadata_dict[key])
 
-        av_command = 'clamscan -i -l {} --recursive {}'.format(self.barcode_item.virus_log, self.barcode_item.files_dir)  
-        
-        timestamp = str(datetime.datetime.now())
-        exitcode = subprocess.call(av_command, shell=True, text=True)
-        
-        #store virus scan results in metadata_dict
-        with open(virus_log, 'r') as f:
-            if "Infected files: 0" not in f.read():
-                self.barcode_item.metadata_dict['virus_scan_results'] = 'WARNING! Virus or malware found; see %s.' % virus_log            
-            else:
-                self.barcode_item.metadata_dict['virus_scan_results'] = '-'
-
-        #save metadata_dict to file, just in case
-        pickle_dump(self.temp_dir, 'metadata_dict', self.barcode_item.metadata_dict)
-        
-        #save preservation to PREMIS
-        self.record_premis(timestamp, 'virus check', exitcode, av_command, 'Scanned files for malicious programs.', av_ver)
-        
-        print('\n\tVirus scan completed; moving on to next step...')
-
-    def run_bulkext(self):
-
-        #get bulk extractor version for premis
-        try:
-            be_ver = subprocess.check_output(['bulk_extractor', '-V'], shell=True, text=True).rstrip()
-        except subprocess.CalledProcessError as e:
-            be_ver = e.output.rstrip()
-        
-        print('\n\tScan underway...be patient!\n')
-        
-        #use default command with buklk_extractor
-        bulkext_command = 'bulk_extractor -x aes -x base64 -x elf -x exif -x gps -x hiberfile -x httplogs -x json -x kml -x net -x pdf -x sqlite -x winlnk -x winpe -x winprefetch -S ssn_mode=2 -q -1 -o "{}" -R "{}" > "{}"'.format(self.barcode_item.bulkext_dir, self.barcode_item.files_dir, self.barcode_item.bulkext_log)
-        
-        if os.path.exists(self.barcode_item.bulkext_dir):
-            shutil.rmtree(self.barcode_item.bulkext_dir)
-        
-        try:
-            os.makedirs(self.barcode_item.bulkext_dir)
-        except OSError as exception:
-            if exception.errno != errno.EEXIST:
-                raise
-
-        #create timestamp
-        timestamp = str(datetime.datetime.now())        
-
-        exitcode = subprocess.call(bulkext_command, shell=True, text=True)
-       
-        #record event in PREMIS metadata
-        self.record_premis(timestamp, 'sensitive data scan', exitcode, bulkext_command, 'Scanned files for potentially sensitive information, including Social Security and credit card numbers.', be_ver)
-        
-        #create a cumulative BE report
-        if os.path.exists(self.barcode_item.cumulative_be_report):
-            os.remove(self.barcode_item.cumulative_be_report)
-            
-        for myfile in ('pii.txt', 'ccn.txt', 'email.txt', 'telephone.txt', 'find.txt'):
-            myfile = os.path.join(self.barcode_item.bulkext_dir, myfile)
-            if os.path.exists(myfile) and os.stat(myfile).st_size > 0:
-                with open(myfile, 'rb') as filein:
-                    data = filein.read().splitlines()    
-                with open(self.barcode_item.cumulative_be_report, 'a', encoding='utf8') as outfile:
-                    outfile.write('%s: %s\n' % (os.path.basename(myfile), len(data[5:])))
-        
-        #if no results from the above, create file so we don't throw an error later
-        if not os.path.exists(self.barcode_item.cumulative_be_report):         
-            open(self.barcode_item.cumulative_be_report, 'a').close()
-
-        #move any b_e histogram files, if needed
-        for myfile in ('email_domain_histogram.txt', 'find_histogram.txt', 'telephone_histogram.txt'):
-            current_file = os.path.join(self.barcode_item.bulkext_dir, myfile)
-            try:    
-                if os.stat(current_file).st_size > 0:
-                    shutil.copy(current_file, self.barcode_item.reports_dir)
-            except OSError:
-                continue
-        
-        print('\n\tSensitive data scan completed; moving on to next step...')
-    
-    def format_analysis(self):
-    
-        print('\n\tFile format identification with Siegfried...') 
-
-        format_version = subprocess.check_output('sf -version', shell=True, text=True).replace('\n', ' ')
-        
-        #remove Siegrfried report if it already exists
-        if os.path.exists(self.barcode_item.sf_file):
-            os.remove(self.barcode_item.sf_file)                                                                 
-                
-        format_command = 'sf -z -csv "{}" > "{}"'.format(self.barcode_item.files_dir, self.barcode_item.sf_file)
-        
-        #create timestamp
-        timestamp = str(datetime.datetime.now())
-        
-        exitcode = subprocess.call(format_command, shell=True, text=True)
-        
-        #if siegfried fails, then we'll run DROID
-        if exitcode != 0 and os.path.getsize(sf_file) == 0:
-            print('\n\tFile format identification with siegfried failed; now attempting with DROID...\n') 
-            
-            format_version = "DROID v%s" % subprocess.check_output('droid -v', shell=True, text=True).strip()
-            
-            droid_cmd1 = 'droid -RAq -a "{}" -p "{}"' % (self.barcode_item.files_dir, self.barcode_item.droid_profile)
-            
-            exitcode = subprocess.call(droid_cmd1, shell=True)
-            
-            droid_cmd2 = 'droid -p "{}" -e "{}"'.format(self.barcode_item.droid_profile, self.barcode_item.droid_out)
-            
-            subprocess.call(droid_cmd2, shell=True)
-            
-            #consolidate commands for premis
-            format_command = "{} && {}".format(droid_cmd1, droid_cmd2)
-            
-            #now reformat droid output to be like sf output
-            droid_to_siegfried(self.barcode_item.droid_out, self.barcode_item.sf_file)
-        
-        #record event in PREMIS metadata
-        self.record_premis(timestamp, 'format identification', exitcode, format_command, 'Determined file format and version numbers for content using the PRONOM format registry.', format_version)
-
-    def import_csv(self):
-
-        conn = sqlite3.connect(self.barcode_item.siegfried_db)
-        conn.text_factory = str  # allows utf-8 data to be stored
-        cursor = conn.cursor()
-
-        print('\n\tImporting siegried file to sqlite3 database...')
-        
-        """Import csv file into sqlite db"""
-        f = open(self.barcode_item.sf_file, 'r', encoding='utf8')
-        
-        try:
-            reader = csv.reader(x.replace('\0', '') for x in f) # replace null bytes with empty strings on read
-        except UnicodeDecodeError:
-            f = (x.strip() for x in f) # skip non-utf8 encodable characters
-            reader = csv.reader(x.replace('\0', '') for x in f) # replace null bytes with empty strings on read
-        header = True
-        for row in reader:
-            if header:
-                header = False # gather column names from first row of csv
-                sql = "DROP TABLE IF EXISTS siegfried"
-                cursor.execute(sql)
-                sql = "CREATE TABLE siegfried (filename text, filesize text, modified text, errors text, namespace text, id text, format text, version text, mime text, basis text, warning text)"
-                cursor.execute(sql)
-                insertsql = "INSERT INTO siegfried VALUES (%s)" % (", ".join([ "?" for column in row ]))
-                rowlen = len(row)
-            else:
-                # skip lines that don't have right number of columns
-                if len(row) == rowlen:
-                    cursor.execute(insertsql, row)
-        conn.commit()
-        f.close()
-        
-        #create file to indicate that this operation has completed
-        open(self.barcode_item.sqlite_done, 'a').close()
-        
-        cursor.close()
-        conn.close()
-
-    def stats_and_report_creation(self):
-            
-        #set up html for report
-        html_doc = open(self.barcode_item.temp_html, 'w', encoding='utf8')
-        
-        #prepare sqlite database and variables
-        conn = sqlite3.connect(self.barcode_item.siegfried_db)
-        conn.text_factory = str  # allows utf-8 data to be stored
-        cursor = conn.cursor() 
-        
-        """Get aggregate statistics and write to html report"""
-        self.get_stats(cursor, html_doc) # get aggregate stats and write to html file
-        generate_reports(cursor, html_doc, folders, re_analyze, item_barcode) # run sql queries, print to html and csv
-        close_html(html_doc) # close HTML file tags
-        
-        # close database connections
-        cursor.close()
-        conn.close()
-        
-        print('\n\tFormat analysis completed!')
-        
-        # close HTML file
-        html_doc.close()
-
-        # write new html file, with hrefs for PRONOM IDs           
-        if os.path.exists(self.barcode_item.new_html):
-            os.remove(self.barcode_item.new_html)
-
-        write_pronom_links(self.barcode_item.temp_html, self.barcode_item.new_html)
-        
-        fileformats = []
-        formatcount = 0
-        formatlist = ''
-        formatcsv = os.path.join(self.barcode_item.reports_dir, 'formats.csv')
-        try:
-            with open(formatcsv, 'r') as csvfile:
-                formatreader = csv.reader(csvfile)
-                next(formatreader)
-                for row in formatreader:
-                    formatcount += 1
-                    fileformats.append(row[0])
-                fileformats = [element or 'Unidentified' for element in fileformats] # replace empty elements with 'Unidentified'
-                if formatcount > 0:
-                    self.barcode_item.metadata_dict['format_overview'] = "Top file formats (out of %s total) are: %s" % (formatcount, ' | '.join(fileformats[:10]))
-                else:
-                    self.barcode_item.metadata_dict['format_overview'] = "-"
-                
-        except IOError:
-            self.barcode_item.metadata_dict['format_overview'] = "ERROR! No formats.csv file to pull formats from."
-        
-        #save metadata_dict, just in case...
-        pickle_dump(self.temp_dir, 'metadata_dict', self.barcode_item.metadata_dict)
-    
-    def get_stats(self, cursor, html_doc):
-        print('\n\tGetting statistics about content...')
-        
-        # get stats from sqlite db
-        cursor.execute("SELECT COUNT(*) from siegfried;") # total files
-        num_files = cursor.fetchone()[0]
-
-        cursor.execute("SELECT COUNT(*) from siegfried where filesize='0';") # empty files
-        empty_files = cursor.fetchone()[0]
-        
-        #retrieve our 'file stats'
-        file_stats = []
-        try:
-            with open(self.barcode_item.checksums, 'rb') as f:
-                file_stats = pickle.load(f)
-        except FileNotFoundError:
-            pass
-            
-        #Get stats on duplicates. Just in case the bdpl ingest tool crashes after compiling a duplicates list, we'll check to see if it already exists
-        dup_list = []
-        if os.path.exists(self.barcode_item.duplicates) and not self.re_analyze:
-            dup_list = pickle_load(self.temp_dir, 'ls', 'duplicates')
-        else:
-            #next, create a new dictionary that IDs checksums that correspond to 1 or more files. NOTE: the 'file_stats' list will be empty for DVDs, so we'll skip this step in that case
-            if len(file_stats) > 1:
-                stat_dict = {}
-                for dctnry in file_stats:
-                    if int(dctnry['size']) > 0:
-                        if dctnry['checksum'] in stat_dict:
-                            stat_dict[dctnry['checksum']].append(dctnry['name'])
-                        else:
-                            stat_dict[dctnry['checksum']] = [dctnry['name']]
-               
-                #go through new dict and find checksums with duplicates
-                for chksm in [key for key, values in stat_dict.items() if len(values) > 1]:
-                    for fname in stat_dict[chksm]:
-                        temp = [item for item in file_stats if item['checksum'] == chksm and item['name'] == fname][0]
-                        dup_list.append([temp['name'], temp['size'], temp['mtime'], temp['checksum']])
-                
-            #save this duplicate file for later when we need to write to html
-            pickle_dump(self.temp_dir, 'duplicates', dup_list)
-        
-        #total duplicates = total length of duplicate list
-        all_dupes = len(dup_list)
-
-        #distinct duplicates = # of unique checksums in the duplicates list
-        distinct_dupes = len(set([c[3] for c in dup_list]))
-
-        #duplicate copies = # of unique files that may have one or more copies
-        duplicate_copies = int(all_dupes) - int(distinct_dupes) # number of duplicate copies of unique files
-        duplicate_copies = str(duplicate_copies)
-        
-        distinct_files = int(num_files) - int(duplicate_copies)
-        distinct_files = str(distinct_files)
-            
-        cursor.execute("SELECT COUNT(*) FROM siegfried WHERE id='UNKNOWN';") # unidentified files
-        unidentified_files = cursor.fetchone()[0]
-        
-        #for dvd jobs, we need to use disk image metadata for dates...
-        if self.job_type == 'DVD':
-            try:
-                with open(self.checksums_dvd, 'rb') as f:
-                    file_stats = pickle.load(f)
-            except FileNotFoundError:
-                pass
-                
-        #For reporting purposes, we want to catch any files whose current 'mtime' was set to the replication in the BDPL process.
-        premis_list = pickle_load(self.temp_dir, 'ls', 'premis_list')
-        
-        #first, establish when we ran the replication operation
-        try:
-            bdpl_time = [p for p in premis_list if p['eventType'] == 'replication'][0]['timestamp'].split('.')[0].replace('T', ' ')
-        except IndexError:
-            bdpl_time = datetime.datetime.fromtimestamp(os.path.getmtime(self.barcode_item.folders_created)).isoformat().replace('T', ' ').split('.')[0]
-        
-        bdpl_time = datetime.datetime.strptime(bdpl_time, "%Y-%m-%d %H:%M:%S")
-        
-        #next, go through or file list.  If the 'mtime' is more recent than the 'BDPL' replication action, that means we don't have the original file timestamp.  Only record older/original dates in a date_info list
-        date_info = []
-        undated_count = []
-        if len(file_stats) > 0:
-            for dctnry in file_stats:
-                dt_time = dctnry['mtime'].replace('T', ' ').split('.')[0]
-                dt_time = datetime.datetime.strptime(dt_time, "%Y-%m-%d %H:%M:%S")
-                if dt_time < bdpl_time:
-                    date_info.append(dctnry['mtime'])
-                else:
-                    undated_count.append('undated')
-            
-        #If we've collected any dates in our date_info list, set date ranges and then record years in separate list
-        if len(date_info) > 0:
-            begin_date = min(date_info)[:4]
-            end_date = max(date_info)[:4]
-            earliest_date = min(date_info)
-            latest_date = max(date_info)   
-            
-            year_info = [x[:4] for x in date_info]
-            
-        #if date_info is empty, record 'undated' for date ranges
-        else:
-            begin_date = "undated"
-            end_date = "undated"
-            earliest_date = "undated"
-            latest_date = "undated"
-            
-            year_info = undated_count
-            
-        #get frequency of each year for report       
-        year_count = dict(Counter(year_info))
-        
-        path = os.path.join(self.barcode_item.reports_dir, 'years.csv')    
-        with open(path, 'w', newline='') as f:
-            writer = csv.writer(f)
-            year_header = ['Year Last Modified', 'Count']
-            writer.writerow(year_header)
-            if len(year_count) > 0:
-                for key, value in year_count.items():
-                    writer.writerow([key, value])
-
-        cursor.execute("SELECT COUNT(DISTINCT format) as formats from siegfried WHERE format <> '';") # number of identfied file formats
-        num_formats = cursor.fetchone()[0]
-
-        cursor.execute("SELECT COUNT(*) FROM siegfried WHERE errors <> '';") # number of siegfried errors
-        num_errors = cursor.fetchone()[0]
-
-        # calculate size from recursive dirwalk and format
-        size_bytes = 0
-        for root, dirs, files in os.walk(self.barcode_item.files_dir):
-            for f in files:
-                file_path = os.path.join(root, f)
-                file_info = os.stat(file_path)
-                size_bytes += file_info.st_size
-
-        size = convert_size(size_bytes)
-        
-        # write html
-        html_doc.write('<!DOCTYPE html>')
-        html_doc.write('\n<html lang="en">')
-        html_doc.write('\n<head>')
-        html_doc.write('\n<title>IUL Born Digital Preservation Lab report: %s</title>' % self.barcode_item.item_barcode)
-        html_doc.write('\n<meta http-equiv="Content-Type" content="text/html; charset=utf-8">')
-        html_doc.write('\n<meta name="description" content="HTML report based upon a template developed by Tim Walsh and distributed as part of Brunnhilde v. 1.7.2">')
-        html_doc.write('\n<link rel="stylesheet" href="./assets//css/bootstrap.min.css">')
-        html_doc.write('\n</head>')
-        html_doc.write('\n<body style="padding-top: 80px">')
-        # navbar
-        html_doc.write('\n<nav class="navbar navbar-expand-lg navbar-dark bg-dark fixed-top">')
-        html_doc.write('\n<a class="navbar-brand" href="#">Brunnhilde</a>')
-        html_doc.write('\n<button class="navbar-toggler" type="button" data-toggle="collapse" data-target="#navbarNavAltMarkup" aria-controls="navbarNavAltMarkup" aria-expanded="false" aria-label="Toggle navigation">')
-        html_doc.write('\n<span class="navbar-toggler-icon"></span>')
-        html_doc.write('\n</button>')
-        html_doc.write('\n<div class="collapse navbar-collapse" id="navbarNavAltMarkup">')
-        html_doc.write('\n<div class="navbar-nav">')
-        html_doc.write('\n<a class="nav-item nav-link" href="#Provenance">Provenance</a>')
-        html_doc.write('\n<a class="nav-item nav-link" href="#Stats">Statistics</a>')
-        html_doc.write('\n<a class="nav-item nav-link" href="#File formats">File formats</a>')
-        html_doc.write('\n<a class="nav-item nav-link" href="#File format versions">Versions</a>')
-        html_doc.write('\n<a class="nav-item nav-link" href="#MIME types">MIME types</a>')
-        html_doc.write('\n<a class="nav-item nav-link" href="#Last modified dates by year">Dates</a>')
-        html_doc.write('\n<a class="nav-item nav-link" href="#Unidentified">Unidentified</a>')
-        html_doc.write('\n<a class="nav-item nav-link" href="#Errors">Errors</a>')
-        html_doc.write('\n<a class="nav-item nav-link" href="#Duplicates">Duplicates</a>')
-        html_doc.write('\n<a class="nav-item nav-link" href="#Personally Identifiable Information (PII)">PII</a>')
-        html_doc.write('\n<a class="nav-item nav-link" href="#Named Entities">Named Entities</a>')
-        html_doc.write('\n</div>')
-        html_doc.write('\n</div>')
-        html_doc.write('\n</nav>')
-        # content
-        html_doc.write('\n<div class="container-fluid">')
-        html_doc.write('\n<h1 style="text-align: center; margin-bottom: 40px;">IUL BDPL Brunnhilde HTML report</h1>')
-        # provenance
-        html_doc.write('\n<a name="Provenance" style="padding-top: 40px;"></a>')
-        html_doc.write('\n<div class="container-fluid" style="margin-bottom: 40px;">')
-        html_doc.write('\n<div class="card">')
-        html_doc.write('\n<h2 class="card-header">Provenance</h2>')
-        html_doc.write('\n<div class="card-body">')
-        '''need to check if disk image or not'''
-        if jobType == 'Copy_only':
-            html_doc.write('\n<p><strong>Input source: File directory</strong></p>')
-        elif jobType == 'DVD':
-            html_doc.write('\n<p><strong>Input source: DVD-Video (optical disc)</strong></p>')
-        elif jobType == 'CDDA':
-            html_doc.write('\n<p><strong>Input source: Compact Disc Digital Audio</strong></p>')
-        elif jobType == 'Disk_image':
-            html_doc.write('\n<p><strong>Input source: Physical media</strong></p>')
-            
-        html_doc.write('\n<p><strong>Item identifier:</strong> %s</p>' % self.barcode_item.item_barcode)
-        html_doc.write('\n</div>')
-        html_doc.write('\n</div>')
-        html_doc.write('\n</div>')
-        # statistics
-        html_doc.write('\n<a name="Stats" style="padding-top: 40px;"></a>')
-        html_doc.write('\n<div class="container-fluid" style="margin-bottom: 40px;">')
-        html_doc.write('\n<div class="card">')
-        html_doc.write('\n<h2 class="card-header">Statistics</h2>')
-        html_doc.write('\n<div class="card-body">')
-        html_doc.write('\n<h4>Overview</h4>')
-        html_doc.write('\n<p><strong>Total files:</strong> %s (includes contents of archive files)</p>' % num_files)
-        html_doc.write('\n<p><strong>Total size:</strong> %s</p>' % size)
-        html_doc.write('\n<p><strong>Years (last modified):</strong> %s - %s</p>' % (begin_date, end_date))
-        html_doc.write('\n<p><strong>Earliest date:</strong> %s</p>' % earliest_date)
-        html_doc.write('\n<p><strong>Latest date:</strong> %s</p>' % latest_date)
-        html_doc.write('\n<h4>File counts and contents</h4>')
-        html_doc.write('\n<p><em>Calculated by hash value. Empty files are not counted in first three categories. Total files = distinct + duplicate + empty files.</em></p>')
-        html_doc.write('\n<p><strong>Distinct files:</strong> %s</p>' % distinct_files)
-        html_doc.write('\n<p><strong>Distinct files with duplicates:</strong> %s</p>' % distinct_dupes)
-        html_doc.write('\n<p><strong>Duplicate files:</strong> %s</p>' % duplicate_copies)
-        html_doc.write('\n<p><strong>Empty files:</strong> %s</p>' % empty_files)
-        html_doc.write('\n<h4>Format identification</h4>')
-        html_doc.write('\n<p><strong>Identified file formats:</strong> %s</p>' % num_formats)
-        html_doc.write('\n<p><strong>Unidentified files:</strong> %s</p>' % unidentified_files)
-        html_doc.write('\n<h4>Errors</h4>')
-        html_doc.write('\n<p><strong>Siegfried errors:</strong> %s</p>' % num_errors)
-        html_doc.write('\n<h2>Virus scan report</h2>')
-        with open(self.barcode_item.virus_log, 'r', encoding='utf-8') as f:
-            virus_report = f.read()
-        html_doc.write('\n<p>%s</p>' % virus_report)
-        html_doc.write('\n</div>')
-        html_doc.write('\n</div>')
-        html_doc.write('\n</div>')
-        # detailed reports
-        html_doc.write('\n<div class="container-fluid" style="margin-bottom: 40px;">')
-        html_doc.write('\n<div class="card">')
-        html_doc.write('\n<h2 class="card-header">Detailed reports</h2>')
-        html_doc.write('\n<div class="card-body">')
-        
-        #save information to metadata_dict     
-        self.barcode_item.metadata_dict.update({'Source': item_barcode, 'begin_date': begin_date, 'end_date' : end_date, 'extent_normal': size, 'extent_raw': size_bytes, 'item_file_count': num_files, 'item_duplicate_count': distinct_dupes, 'FormatCount': num_formats, 'item_unidentified_count': unidentified_files})  
-        
-        #save metadata_dict to file just in case...
-        pickle_dump(self.temp_dir, 'metadata_dict', self.barcode_item.metadata_dict)
-    
-    def generate_reports(cursor, html_doc, folders, re_analyze, item_barcode):
-        
-        print('\n\tGenerating format reports and writing html...')
-        
-        """Run sql queries on db to generate reports, write to csv and html"""
-        full_header = ['Filename', 'Filesize', 'Date modified', 'Errors', 
-                    'Namespace', 'ID', 'Format', 'Format version', 'MIME type', 
-                    'Basis for ID', 'Warning']
-        
-        # sorted format list report
-        path = os.path.join(reports_dir, 'formats.csv')
-        if not os.path.exists(path) or re_analyze:
-            sql = "SELECT format, id, COUNT(*) as 'num' FROM siegfried GROUP BY format ORDER BY num DESC"
-            format_header = ['Format', 'ID', 'Count']
-            sqlite_to_csv(sql, path, format_header, cursor)
-        write_html('File formats', path, ',', html_doc, folders, item_barcode)
-
-        # sorted format and version list report
-        path = os.path.join(reports_dir, 'formatVersions.csv')
-        if not os.path.exists(path) or re_analyze:
-            sql = "SELECT format, id, version, COUNT(*) as 'num' FROM siegfried GROUP BY format, version ORDER BY num DESC"
-            version_header = ['Format', 'ID', 'Version', 'Count']
-            sqlite_to_csv(sql, path, version_header, cursor)
-        write_html('File format versions', path, ',', html_doc, folders, item_barcode)
-
-        # sorted mimetype list report
-        path = os.path.join(reports_dir, 'mimetypes.csv')
-        if not os.path.exists(path) or re_analyze:
-            sql = "SELECT mime, COUNT(*) as 'num' FROM siegfried GROUP BY mime ORDER BY num DESC"
-            mime_header = ['MIME type', 'Count']
-            sqlite_to_csv(sql, path, mime_header, cursor)
-        write_html('MIME types', path, ',', html_doc, folders, item_barcode)
-
-        # dates report
-        path = os.path.join(reports_dir, 'years.csv')
-        write_html('Last modified dates by year', path, ',', html_doc, folders, item_barcode)
-        
-        # unidentified files report
-        path = os.path.join(reports_dir, 'unidentified.csv')
-        if not os.path.exists(path) or re_analyze:
-            sql = "SELECT * FROM siegfried WHERE id='UNKNOWN';"
-            sqlite_to_csv(sql, path, full_header, cursor)
-        write_html('Unidentified', path, ',', html_doc, folders, item_barcode)
-        
-        # errors report
-        path = os.path.join(reports_dir, 'errors.csv')
-        if not os.path.exists(path) or re_analyze:
-            sql = "SELECT * FROM siegfried WHERE errors <> '';"
-            sqlite_to_csv(sql, path, full_header, cursor)
-        write_html('Errors', path, ',', html_doc, folders, item_barcode)
-        
-        # duplicates report: retrieve our 'duplicates' file instead of CSV
-        dup_list = pickle_load('duplicates', folders, item_barcode)
-        write_html('Duplicates', dup_list, ',', html_doc, folders, item_barcode)
-        
-        #PII report: 
-        cumulative_report = os.path.join(bulkext_dir, 'cumulative.txt')
-        if os.path.exists(cumulative_report):
-            write_html('Personally Identifiable Information (PII)', cumulative_report, '\n', html_doc, folders, item_barcode)
-        
-    
-    def check_premis(self, term):
-        #check to see if an event is already in our premis list--i.e., it's been successfully completed.  Currently only used for most resource-intensive operations: virus scheck, sensitive data scan, format id, and checksum calculation.
-        
-        #set up premis_list
-        premis_list = pickle_load(self.temp_dir, 'ls', 'premis_list')
-        
-        #see if term has been recorded at all
-        found = [dic for dic in premis_list if dic['eventType'] == term]
-        
-        #if not recorded, it hasn't been run
-        if not found: 
-            return False
-        else:
-            #for virus scans, we will assume that completion may have either a 0 or non-zero value.  No need to run again.
-            if term == 'virus check':
-                return True
-            elif term == 'metadata extraction':
-                if [dc for dc in found if 'tree v1.7.0' in dc['linkingAgentIDvalue']]:
-                    return True
-            #for other microservices, check if operation completed successfully; if so, return True, otherwise False
-            else:
-                if [dc for dc in found if dc['eventOutcomeDetail'] in ['0', 0]]:
-                    return True
-                else:
-                    return False
+        #save and close spreadsheet
+        self.wb.save(self.spreadsheet)   
 
 def close_app(window):
-    print('BYE!')
     window.destroy()
     sys.exit(0)
 
@@ -2317,7 +2787,7 @@ def newscreen():
             print(fin.read())
             print('\n')
     else:
-        print('Missing ASCII art header file; download to: %s' % fname)
+        print('Missing ASCII art header file; download to: {}'.format(fname))
 
 def pickle_load(temp_dir, array_type, array_name):
         
@@ -2362,13 +2832,13 @@ def convert_size(size):
     s = round(size/p)
     s = str(s)
     s = s.replace('.0', '')
-    return '%s %s' % (s,size_name[i])
+    return '{} {}'.format(s,size_name[i])
 
 
 def check_files(some_dir):
     #check to see if it exists
     if not os.path.exists(some_dir):
-        print('\n\nError; folder "%s" does not exist.' % some_dir)
+        print('\n\nError; folder "{}" does not exist.'.format(some_dir))
         return False
     
     #make sure there are files in the 'files' directory
@@ -2383,9 +2853,108 @@ def check_files(some_dir):
     #if no files found, return false
     return False
 
+def update_software():
+    #make sure PRONOM and antivirus signatures are up to date
+    sfup = 'sf -update'
+    fresh_up = 'freshclam'
+    droid_up = 'droid -d'
+    
+    update_completed = 'C:/BDPL/resources/clamav/updated.txt'
+
+    #don't run update if we've already completed one today
+    if os.path.exists(update_completed):
+        file_mod_time = datetime.datetime.fromtimestamp(os.stat(update_completed).st_mtime).strftime('%Y%m%d')
+    else:
+        file_mod_time = datetime.datetime.strptime('20200101', '%Y%m%d').strftime('%Y%m%d')
+        
+    now = datetime.datetime.today().strftime('%Y%m%d')
+    
+    if now > file_mod_time:
+        print('\n\nUpdating PRONOM and antivirus signatures...')
+        
+        subprocess.check_output(sfup, shell=True, text=True)
+        subprocess.check_output(droid_up, shell=True, text=True)
+        output = subprocess.run(fresh_up, shell=True, text=True, capture_output=True)
+        
+        #if clamav is outdated, update it
+        if 'OUTDATED!' in output.stderr:
+            version = output.stderr.strip().split('Recommended version: ')[1]
+            update_clamav(version)
+        
+        print('\nUpdate complete!  Time to ingest some date...')
+        
+        open(update_completed, 'w').close()
+    
+def update_clamav(version):
+    
+    print('\nUpdating ClamAV...')
+    
+    file = "https://www.clamav.net/downloads/production/clamav-%s-win-x64-portable.zip" % version
+
+    print('\n\tChecking %s...' % file)
+
+    #make sure the URL works; exit if not.  NOTE: may need to change hard-coded URL
+    try:
+        urllib.request.urlopen(file)
+        print('\n\tURL looks good...')
+    except (urllib.error.HTTPError, urllib.error.URLError) as e:
+        print(e, '\n\n%s may be incorrect; check ClamAV download URL')
+        return
+
+    filename = os.path.basename(file)
+
+    #get username so we can download to local Downloads folder
+    username = os.getlogin()
+    downloads = os.path.join('C:\\Users', username, 'Downloads')
+    dest = os.path.join(downloads, filename)
+
+    if os.path.exists(dest):
+        os.remove(dest)
+
+    #download zip file
+    print('\n\tDownloading new version of ClamAV...\n')
+    urllib.request.urlretrieve(file, dest, reporthook)
+
+    #extract contents of zip
+    print('\n\tExtracting contents from zip file...')
+    extract_dest = os.path.join(downloads, 'clamav')
+    if os.path.exists(extract_dest):
+        shutil.rmtree(extract_dest)
+        
+    with zipfile.ZipFile(dest, 'r') as zip_ref:
+        zip_ref.extractall(extract_dest)
+        
+    #copy our freshclam.conf file
+    conf_file = 'C:/BDPL/resources/clamav/freshclam.conf'
+    if os.path.exists(conf_file):
+        shutil.copy('C:/BDPL/resources/clamav/freshclam.conf', extract_dest)
+
+    #remove old clamav
+    print('\n\tRemoving old version of ClamAV...')
+    bdpl_dest = 'C:/BDPL/resources/clamav'
+    if os.path.exists(bdpl_dest):
+        shutil.rmtree(bdpl_dest)
+
+    #create new conf files if they don't exist:
+    if not os.path.exists(os.path.join(extract_dest, 'freshclam.conf')):
+        shutil.copy(os.path.join(extract_dest, 'conf_examples', 'freshclam.conf.sample'),  os.path.join(extract_dest, 'freshclam.conf'))
+        shutil.copy(os.path.join(extract_dest, 'conf_examples', 'clamd.conf.sample'),  os.path.join(extract_dest, 'clamd.conf'))
+        
+    #copy over new version
+    print('\n\tMoving new version to %s...' % bdpl_dest)
+    shutil.move(extract_dest, 'C:/BDPL/resources')
+
+    #run freshclam to update definitions
+    print('\n\tUpdating antivirus definitions...\n')
+    subprocess.check_output('freshclam', shell=True, text=True)
+    
+    print('\n\tClamAV update complete!')
+
 def main():
     #clear CMD.EXE screen and print logo
     newscreen()
+    
+    update_software()
 
     #assign path for 'home directory'.  Change if needed...
     bdpl_home_dir = 'Z:/'
