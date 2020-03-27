@@ -41,6 +41,7 @@ class BdplMainApp(tk.Tk):
         self.protocol('WM_DELETE_WINDOW', lambda: close_app(self))
 
         self.bdpl_home_dir = bdpl_home_dir
+        self.bdpl_resources = os.path.join(bdpl_home_dir, 'bdpl_resources')
         
         #variables entered into BDPL interface
         self.job_type = tk.StringVar()
@@ -307,7 +308,7 @@ class BdplIngest(tk.Frame):
         button_id['Load'].config(command = self.launch_session)
         button_id['Transfer'].config(command = self.launch_transfer)
         button_id['Analyze'].config(command = self.launch_analysis)
-        button_id['Add PREMIS']['state'] = 'disabled'
+        button_id['Add PREMIS'].config(command = self.add_premis_event)
         button_id['Quit'].config(command = lambda: close_app(self.controller))
 
         '''
@@ -508,7 +509,7 @@ class BdplIngest(tk.Frame):
             print(msg)
             return
         
-        #create a barcode object and job object
+        #create a barcode object
         current_barcode = ItemBarcode(self.controller)
         
         #make sure we have already initiated a session for this barcode
@@ -680,6 +681,17 @@ class BdplIngest(tk.Frame):
         current_spreadsheet.write_to_spreadsheet(current_barcode.metadata_dict)
         
         print('\n\nInformation saved to Appraisal worksheet.') 
+        
+    def add_premis_event(self):
+        
+        #make sure main variables--unit_name, shipment_date, and barcode--are included.  Return if either is missing
+        status, msg = self.controller.check_main_vars()
+        if not status:
+            print(msg)
+            return
+        
+        #create a manual PREMIS object
+        new_premis_event = ManualPremisEvent(self, self.controller)
         
     def clear_gui(self):
         #self.controller = controller
@@ -2879,43 +2891,108 @@ class Spreadsheet(Shipment):
         #save and close spreadsheet
         self.wb.save(self.spreadsheet)   
 
-class ManualPremis:
+class ManualPremisEvent(tk.Toplevel):
     def __init__(self, parent, controller):
-        self.parent = parent
+        tk.Toplevel.__init__(self, parent)
+        self.title='BDPL Ingest: Add PREMIS Event'
+        self.protocol('WM_DELETE_WINDOW', self.close_top)
+        
         self.controller = controller
-        self.top = tk.Toplevel(self.parent, title='BDPL Ingest: Add PREMIS Event')
+        
+        #self.db = 
+        
+        self.barcode_item = ItemBarcode(self.controller)
 
-        self.event_frame = tk.LabelFrame(self.top, text='Item Barcode: {}'.format(self.controller.item_barcode.get())).pack()
-        self.timestamp_frame = tk.LabelFrame(self.top, text='Timestamp Information'.format(self.controller.item_barcode.get())).pack()
+        self.event_frame = tk.LabelFrame(self, text='Item Barcode: {}'.format(self.controller.item_barcode.get()))
+        self.event_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        self.timestamp_frame = tk.LabelFrame(self, text='Timestamp Information')
+        self.timestamp_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        self.button_frame = tk.Frame(self)
+        self.button_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
         
         self.manual_event = tk.StringVar()
         self.manual_event.set('')
-        self.events = ['replication', 'disk image creation', 'format identification', 'forensic feature analysis', 'message digest calculation', 'metadata extraction', 'metadata modification', 'normalization', 'other', 'virus check']
         
-        self.event_label = ttk.Label(self.event_frame, text='Select event:')
-        self.event_label.grid(row=0, column=0, padx=(10,0), pady=10)
-        self.event_combobox = ttk.Combobox(self.event_frame, width=30, textvariable=self.manual_event, values=self.events)
-        self.event_combobox.grid(row=0, column=1, padx=(0,10), pady=10)
+        self.events = {
+            'replication' : 'Created a copy of an object that is, bit-wise, identical to the original.', 
+            'disk image creation' : 'Extracted a disk image from the physical information carrier.',
+            'forensic feature analysis' : 'Forensically analyzed the disk image raw bitstream',
+            'format identification' : 'Determined file format and version numbers for content recorded in the PRONOM format registry.', 
+            'message digest calculation' : 'Extracted information about the structure and characteristics of content, including file checksums.',
+            'metadata extraction' : 'Extracted metadata from the object.',
+            'metadata modification' : 'Corrected file timestamps to match information extracted from disk image.',
+            'normalization' : 'Transformed object to an institutionally supported preservation format.',
+            'virus check' : 'Scanned files for malicious programs.'
+        }
+        
+        
+        self.event_label = ttk.Label(self.event_frame, text='Select event:', anchor='e', justify=tk.RIGHT, width=20).grid(row=0, column=0, padx=(10,0), pady=10)
+        self.event_combobox = ttk.Combobox(self.event_frame, textvariable=self.manual_event, values=list(self.events.keys()), justify=tk.LEFT, width=30)
+        self.event_combobox.grid(row=0, column=1, padx=(0,10), pady=10, sticky='w')
+        self.event_combobox.bind("<<ComboboxSelected>>", self.update_fields)
 
-        self.event_software = ttk.Entry(self.event_frame, width=20, text='Software:').grid(row=1, column=1, padx=(0,10), pady=10)
-        self.event_software_version = ttk.Entry(self.event_frame, width=20, text='Version:').grid(row=1, column=3, padx=(0,10), pady=10)
-        self.event_command = ttk.Entry(self.event_frame, width=50, text='Command / Description:').grid(row=3, column=0, columnspan=3, padx=(0,10), pady=10)
+        tk.Label(self.event_frame,text='Software name:', anchor='e', justify=tk.RIGHT, width=20).grid(row=1, column=0, padx=(10,0), pady=10)
+        self.event_software = tk.Entry(self.event_frame, justify=tk.LEFT, width=30).grid(row=1, column=1, padx=(0,10), pady=10, sticky='w')
         
-        self.timestamp = tk.StringVar()
-        self.timestamp.set(None)
+        tk.Label(self.event_frame, text='Version #:', anchor='e', justify=tk.RIGHT, width=20).grid(row=2, column=0, padx=(10,0), pady=10)
+        self.event_software_version = tk.Entry(self.event_frame, justify=tk.LEFT, width=30).grid(row=2, column=1, padx=(0,10), pady=10, sticky='w')
         
-        ttk.Radiobutton(self.timestamp_frame, text = 'Use current time for timestamp', variable = self.timestamp, value = 'now', command= lambda: self.get_timestamp('now')).grid(row=0, column=0, padx=10, pady=10)
-        ttk.Radiobutton(self.timestamp_frame, text = 'Get timestamp from file', variable = self.timestamp, value = 'file', command= lambda: self.get_timestamp('file')).grid(row=1, column=0, padx=10, pady=10)
-        ttk.Radiobutton(self.timestamp_frame, text = 'Get timestamp from folder', variable = self.timestamp, value = 'folder', command= lambda: self.get_timestamp('file')).grid(row=2, column=0, padx=10, pady=10)
+        tk.Label(self.event_frame, text='Command / Description:', anchor='e', justify=tk.RIGHT, width=20).grid(row=3, column=0, padx=(10,0), pady=10)
+        self.event_command = tk.Entry(self.event_frame, justify=tk.LEFT, width=50).grid(row=3, column=1, columnspan=3, padx=(0,10), pady=10, sticky='w')
         
+        self.timestamp_source = tk.StringVar()
+        self.timestamp_source.set(None)
         
-    def get_timestamp(self, type):
-        pass
+        info = [['Use current time for timestamp', 'now'], ['Get timestamp from file', 'file'], ['Get timestamp from folder', 'folder']]
+        c = 0
+        for i in info:
+            ttk.Radiobutton(self.timestamp_frame, text = i[0], variable = self.timestamp_source, value = i[1], command=self.get_timestamp).grid(row=c, column=0, padx=10, pady=10, sticky='w')
+            c += 1
         
-    #def check_manual_premis    
+        ttk.Button(self.button_frame, text = 'Save Event', command=self.create_manual_premis_event).grid(row=1, column=1, padx=20, pady=10, sticky="nsew")
+        ttk.Button(self.button_frame, text = 'Quit / Cancel', command=self.close_top).grid(row=1, column=2, padx=20, pady=10, sticky="nsew")
         
+        self.button_frame.grid_rowconfigure(0, weight=1)
+        self.button_frame.grid_rowconfigure(2, weight=1)
+        self.button_frame.grid_columnconfigure(0, weight=1)
+        self.button_frame.grid_columnconfigure(3, weight=1)
+    
+    def update_fields(self, *args):
+        if self.manual_event.get()=='replication':
+            ttk.Label(self.timestamp_frame, text='NOTE: folder contents will be copied to {}'.format(self.barcode_item.files_dir), wraplength=40).grid(row=2, column=1, padx=10, pady=10, sticky='w')
         
+        if self.events.get(self.manual_event.get(), '') == '':
+            self.event_description = ttk.Entry(self.event_frame, width=50, text='Describe preservation event:').grid(row=3, column=0, columnspan=3, padx=(0,10), pady=10)
         
+    def get_timestamp(self):
+        if self.timestamp_source.get() == 'now':
+            ts = str(datetime.datetime.now())
+            
+        elif self.timestamp_source.get() == 'folder':
+            self.selected_dir = filedialog.askdirectory(parent=self, initialdir=self.controller.bdpl_home_dir, title='Select a folder to extract timestamp from')
+            ts = datetime.datetime.fromtimestamp(os.path.getmtime(self.selected_dir)).isoformat()
+            
+        elif self.timestamp_source.get() == 'file':
+            selected_file = filedialog.askopenfilename(parent=self, initialdir=self.controller.bdpl_home_dir, title='Select a file to extract timestamp from')
+            ts = datetime.datetime.fromtimestamp(os.path.getmtime(file_)).isoformat()
+        
+        self.timestamp = ts
+        
+    def create_manual_premis_event(self):
+        if self.events.get(self.manual_event.get(), '') == '':
+            event_desc = self.event_description.get()
+        else:
+            event_desc = self.events[self.manual_event.get()]
+        
+        vers = '{} v{}'.format(self.event_software.get(), self.event_software_version.get())
+        
+        self.barcode_item.record_premis(self.timestamp, self.manual_event.get(), 0, self.event_command.get(), event_desc, vers)
+        
+    def close_top(self):
+        #close shelve
+        
+        #close window
+        self.destroy()     
         
 def close_app(window):
     window.destroy()
