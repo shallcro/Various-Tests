@@ -88,13 +88,18 @@ class BdplMainApp(tk.Tk):
         self.option_add('*tearOff', False)
         self.menubar = tk.Menu(self)
         self.config(menu = self.menubar)
+       
+        self.actions_ = tk.Menu(self.menubar)
+        self.menubar.add_cascade(menu=self.actions_, label='Other actions')
+        self.actions_.add_command(label='Check shipment status', command=self.check_shipment_progress)
+        self.actions_.add_separator()
+        self.actions_.add_command(label='Move media images', command=self.move_media_images)
+        self.actions_.add_separator()
+        self.actions_.add_command(label='Add Manual PREMIS event', command=self.add_premis_event)
+        
         self.help_ = tk.Menu(self.menubar)
         self.menubar.add_cascade(menu=self.help_, label='Help')
         self.help_.add_command(label='Open BDPL wiki', command = lambda: webbrowser.open_new(r"https://wiki.dlib.indiana.edu/display/DIGIPRES/Born+Digital+Preservation+Lab"))
-        self.actions_ = tk.Menu(self.menubar)
-        self.menubar.add_cascade(menu=self.actions_, label='Other actions')
-        self.actions_.add_command(label='Check shpt. status', command=self.check_shipment_progress)
-        self.actions_.add_command(label='Move media images', command=self.move_media_images)
 
     def get_current_tab(self):
         return self.bdpl_notebook.tab(self.bdpl_notebook.select(), 'text')
@@ -113,6 +118,17 @@ class BdplMainApp(tk.Tk):
                 
         #if we get through the above, then we are good to go!
         return (True, 'Unit name and shipment date included.')
+        
+    def add_premis_event(self):
+        
+        #make sure main variables--unit_name, shipment_date, and barcode--are included.  Return if either is missing
+        status, msg = self.check_main_vars()
+        if not status:
+            print(msg)
+            return
+
+        #create a manual PREMIS object
+        new_premis_event = ManualPremisEvent(self)
         
     def move_media_images(self):
         #create unit object
@@ -295,11 +311,11 @@ class BdplIngest(tk.Frame):
         BUTTON FRAME: buttons for BDPL Ingest actions
         '''
         button_id = {}
-        buttons = ['New', 'Load', 'Transfer', 'Analyze', 'Add PREMIS', 'Quit']
+        buttons = ['New', 'Load', 'Transfer', 'Analyze', 'Quit']
 
         for b in buttons:
             button = tk.Button(self.tab_frames_dict['button_frame'], text=b, bg='light slate gray', width = 10)
-            button.pack(side=tk.LEFT, padx=15, pady=10)
+            button.pack(side=tk.LEFT, padx=25, pady=10)
 
             button_id[b] = button
 
@@ -308,7 +324,6 @@ class BdplIngest(tk.Frame):
         button_id['Load'].config(command = self.launch_session)
         button_id['Transfer'].config(command = self.launch_transfer)
         button_id['Analyze'].config(command = self.launch_analysis)
-        button_id['Add PREMIS'].config(command = self.add_premis_event)
         button_id['Quit'].config(command = lambda: close_app(self.controller))
 
         '''
@@ -681,17 +696,6 @@ class BdplIngest(tk.Frame):
         current_spreadsheet.write_to_spreadsheet(current_barcode.metadata_dict)
         
         print('\n\nInformation saved to Appraisal worksheet.') 
-        
-    def add_premis_event(self):
-        
-        #make sure main variables--unit_name, shipment_date, and barcode--are included.  Return if either is missing
-        status, msg = self.controller.check_main_vars()
-        if not status:
-            print(msg)
-            return
-        
-        #create a manual PREMIS object
-        new_premis_event = ManualPremisEvent(self, self.controller)
         
     def clear_gui(self):
         #self.controller = controller
@@ -2892,14 +2896,28 @@ class Spreadsheet(Shipment):
         self.wb.save(self.spreadsheet)   
 
 class ManualPremisEvent(tk.Toplevel):
-    def __init__(self, parent, controller):
-        tk.Toplevel.__init__(self, parent)
-        self.title='BDPL Ingest: Add PREMIS Event'
+    def __init__(self, controller):
+        tk.Toplevel.__init__(self, controller)
+        self.title('BDPL Ingest: Add PREMIS Event')
+        self.iconbitmap(r'C:/BDPL/scripts/favicon.ico')
         self.protocol('WM_DELETE_WINDOW', self.close_top)
         
         self.controller = controller
         
         #self.db = 
+        
+        if self.controller.get_current_tab() != 'BDPL Ingest' or self.controller.item_barcode.get()=='':
+            self.get_info_frame = tk.Frame(self)
+            self.get_info_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+            
+            self.l = ttk.Label(self.get_info_frame, text='Enter barcode:', anchor='e', justify=tk.RIGHT, width=25)
+            self.l.grid(row=0, column=0, padx=(10,0), pady=10)
+            
+            self.barcode_entry = tk.Entry(self.get_info_frame, justify=tk.LEFT, width=50)
+            self.barcode_entry.grid(row=0, column=1, padx=(0,10), pady=10, sticky='w')
+            
+            ttk.Button(self.get_info_frame, text = 'Use barcode', command=self.add_barcode_value).grid(row=1, column=0, padx=10, pady=10, sticky="nsew")
+            ttk.Button(self.get_info_frame, text = 'Cancel', command=self.close_top).grid(row=1, column=1, padx=10, pady=10, sticky="nsew")
         
         self.barcode_item = ItemBarcode(self.controller)
 
@@ -2912,6 +2930,7 @@ class ManualPremisEvent(tk.Toplevel):
         
         self.manual_event = tk.StringVar()
         self.manual_event.set('')
+        self.manual_event.trace('w', self.update_fields)
         
         self.events = {
             'replication' : 'Created a copy of an object that is, bit-wise, identical to the original.', 
@@ -2925,29 +2944,35 @@ class ManualPremisEvent(tk.Toplevel):
             'virus check' : 'Scanned files for malicious programs.'
         }
         
+        self.current_event = {}
+        widgets = {'event_combobox' : 'Select event:', 'event_software' : 'Software name:', 'event_software_version' : 'Version #:', 'event_command' : 'Command / Description:', 'event_description' : 'Describe preservation event:'}
         
-        self.event_label = ttk.Label(self.event_frame, text='Select event:', anchor='e', justify=tk.RIGHT, width=20).grid(row=0, column=0, padx=(10,0), pady=10)
-        self.event_combobox = ttk.Combobox(self.event_frame, textvariable=self.manual_event, values=list(self.events.keys()), justify=tk.LEFT, width=30)
-        self.event_combobox.grid(row=0, column=1, padx=(0,10), pady=10, sticky='w')
-        self.event_combobox.bind("<<ComboboxSelected>>", self.update_fields)
-
-        tk.Label(self.event_frame,text='Software name:', anchor='e', justify=tk.RIGHT, width=20).grid(row=1, column=0, padx=(10,0), pady=10)
-        self.event_software = tk.Entry(self.event_frame, justify=tk.LEFT, width=30).grid(row=1, column=1, padx=(0,10), pady=10, sticky='w')
-        
-        tk.Label(self.event_frame, text='Version #:', anchor='e', justify=tk.RIGHT, width=20).grid(row=2, column=0, padx=(10,0), pady=10)
-        self.event_software_version = tk.Entry(self.event_frame, justify=tk.LEFT, width=30).grid(row=2, column=1, padx=(0,10), pady=10, sticky='w')
-        
-        tk.Label(self.event_frame, text='Command / Description:', anchor='e', justify=tk.RIGHT, width=20).grid(row=3, column=0, padx=(10,0), pady=10)
-        self.event_command = tk.Entry(self.event_frame, justify=tk.LEFT, width=50).grid(row=3, column=1, columnspan=3, padx=(0,10), pady=10, sticky='w')
+        r = 0
+        for name_, label_ in widgets.items():
+            l = '{}_label'.format(name_)
+            self.current_event[l] = ttk.Label(self.event_frame, text=label_, anchor='e', justify=tk.RIGHT, width=25)
+            
+            if name_ == 'event_combobox':
+                self.current_event[name_] = ttk.Combobox(self.event_frame, textvariable=self.manual_event, values=list(self.events.keys()), justify=tk.LEFT, width=30)
+                self.current_event[name_].bind("<<ComboboxSelected>>", self.update_fields)
+            else:
+                self.current_event[name_] = tk.Entry(self.event_frame, justify=tk.LEFT, width=50)
+            
+            if name_ != 'event_description':
+                self.current_event[l].grid(row=r, column=0, padx=(10,0), pady=10)
+                self.current_event[name_].grid(row=r, column=1, padx=(0,10), pady=10, sticky='w')               
+            r+=1
         
         self.timestamp_source = tk.StringVar()
         self.timestamp_source.set(None)
         
-        info = [['Use current time for timestamp', 'now'], ['Get timestamp from file', 'file'], ['Get timestamp from folder', 'folder']]
+        info = [['Use "now" for timestamp', 'now'], ['Get timestamp from file', 'file'], ['Get timestamp from folder', 'folder']]
         c = 0
         for i in info:
             ttk.Radiobutton(self.timestamp_frame, text = i[0], variable = self.timestamp_source, value = i[1], command=self.get_timestamp).grid(row=c, column=0, padx=10, pady=10, sticky='w')
             c += 1
+        
+        self.notice = ttk.Label(self.timestamp_frame, text='NOTE: folder contents will be copied to {}'.format(self.barcode_item.files_dir), wraplength=250)
         
         ttk.Button(self.button_frame, text = 'Save Event', command=self.create_manual_premis_event).grid(row=1, column=1, padx=20, pady=10, sticky="nsew")
         ttk.Button(self.button_frame, text = 'Quit / Cancel', command=self.close_top).grid(row=1, column=2, padx=20, pady=10, sticky="nsew")
@@ -2957,13 +2982,36 @@ class ManualPremisEvent(tk.Toplevel):
         self.button_frame.grid_columnconfigure(0, weight=1)
         self.button_frame.grid_columnconfigure(3, weight=1)
     
+    def add_barcode_value(self):
+        if self.barcode_entry.get() == '':
+            print('\n\nWARNING: Be sure to enter a barcode value')
+            return
+        else:
+            self.controller.item_barcode.set(self.barcode_entry.get().trim())
+            
+        if not Spreadsheet(self.controller).return_inventory_row()[0]:
+            print('\n\nWARNING: Barcode value does not appear in spreadsheet')
+            return
+        else:
+            self.get_info_frame.destroy()
+    
     def update_fields(self, *args):
         if self.manual_event.get()=='replication':
-            ttk.Label(self.timestamp_frame, text='NOTE: folder contents will be copied to {}'.format(self.barcode_item.files_dir), wraplength=40).grid(row=2, column=1, padx=10, pady=10, sticky='w')
-        
-        if self.events.get(self.manual_event.get(), '') == '':
-            self.event_description = ttk.Entry(self.event_frame, width=50, text='Describe preservation event:').grid(row=3, column=0, columnspan=3, padx=(0,10), pady=10)
-        
+            self.notice.grid(row=2, column=1, columnspan = 3, padx=10, pady=10, sticky='w')
+        else:
+            if self.notice.winfo_ismapped():
+                self.notice.grid_forget()
+                
+        #if user adds a different event, we need to get a description of it.  Add fields.
+        if not self.events.get(self.manual_event.get()):
+            self.current_event['event_description_label'].grid(row=4, column=0, padx=(10,0), pady=10)
+            self.current_event['event_description'].grid(row=4, column=1, columnspan=3, padx=(0,10), pady=10)
+        #If the event is already recognized, we don't need to have extra fields.  Hide them if they exist. 
+        else:
+            if self.current_event['event_description_label'].winfo_ismapped():
+                self.current_event['event_description_label'].grid_forget()
+                self.current_event['event_description'].grid_forget()
+            
     def get_timestamp(self):
         if self.timestamp_source.get() == 'now':
             ts = str(datetime.datetime.now())
@@ -2979,14 +3027,21 @@ class ManualPremisEvent(tk.Toplevel):
         self.timestamp = ts
         
     def create_manual_premis_event(self):
-        if self.events.get(self.manual_event.get(), '') == '':
-            event_desc = self.event_description.get()
+    
+        if not self.events.get(self.manual_event.get()):
+            event_desc = self.current_event['event_description'].get()
         else:
             event_desc = self.events[self.manual_event.get()]
         
-        vers = '{} v{}'.format(self.event_software.get(), self.event_software_version.get())
+        #concatenate software name and version #
+        vers = '{} v{}'.format(self.current_event['event_software'].get(), self.current_event['event_software_version'].get())
         
-        self.barcode_item.record_premis(self.timestamp, self.manual_event.get(), 0, self.event_command.get(), event_desc, vers)
+        #save info in our 'premis list' for the item 
+        self.barcode_item.record_premis(self.timestamp, self.manual_event.get(), 0, self.current_event['event_command'].get(), event_desc, vers)
+        
+        #if this is a replication event and we've identified a folder, move the folder
+        if self.manual_event.get() == 'replication' and self.timestamp_source.get() == 'folder':
+            shutil.move(self.selected_dir, self.barcode_item.files_dir)
         
     def close_top(self):
         #close shelve
