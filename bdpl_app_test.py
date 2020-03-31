@@ -31,6 +31,13 @@ import uuid
 import webbrowser
 import zipfile
 
+# from dfxml project
+import Objects
+
+#BDPL files
+#import BdplObjects
+#import BdplIngest
+
 #set up as controller
 class BdplMainApp(tk.Tk):
     def __init__(self, bdpl_home_dir):
@@ -76,7 +83,7 @@ class BdplMainApp(tk.Tk):
         self.tabs = {}
 
         #other tabs: bag_prep, bdpl_to_mco, RipstationIngest
-        app_tabs = {BdplIngest : 'BDPL Ingest'}
+        app_tabs = {BdplIngest : 'BDPL Ingest'} #, RipstationIngest : 'RipStation Ingest'}
 
         for tab, description in app_tabs.items():
             tab_name = tab.__name__
@@ -95,7 +102,7 @@ class BdplMainApp(tk.Tk):
         self.actions_.add_separator()
         self.actions_.add_command(label='Move media images', command=self.move_media_images)
         self.actions_.add_separator()
-        self.actions_.add_command(label='Add Manual PREMIS event', command=self.add_premis_event)
+        self.actions_.add_command(label='Add Manual PREMIS event', command=self.add_manual_premis_event)
         
         self.help_ = tk.Menu(self.menubar)
         self.menubar.add_cascade(menu=self.help_, label='Help')
@@ -119,8 +126,7 @@ class BdplMainApp(tk.Tk):
         #if we get through the above, then we are good to go!
         return (True, 'Unit name and shipment date included.')
         
-    def add_premis_event(self):
-        
+    def add_manual_premis_event(self): 
         #make sure main variables--unit_name, shipment_date, and barcode--are included.  Return if either is missing
         status, msg = self.check_main_vars()
         if not status:
@@ -272,10 +278,10 @@ class BdplIngest(tk.Frame):
         '''
         PATH FRAME: entry box to display directory path and button to launch askfiledialog
         '''
-        self.source_entry = ttk.Entry(self.tab_frames_dict['path_frame'], width=60, textvariable=self.controller.path_to_content)
+        self.source_entry = ttk.Entry(self.tab_frames_dict['path_frame'], width=80, textvariable=self.controller.path_to_content)
         self.source_entry.pack(side=tk.LEFT, padx=(20,5), pady=5)
 
-        self.source_button = ttk.Button(self.tab_frames_dict['path_frame'], text='Browse', command=self.source_browse)
+        self.source_button = tk.Button(self.tab_frames_dict['path_frame'], text='Browse', bg='light slate gray', command=self.source_browse)
         self.source_button.pack(side=tk.LEFT, padx=(5,20), pady=5)
 
         '''
@@ -337,7 +343,7 @@ class BdplIngest(tk.Frame):
         self.bdpl_technician_note.grid(row=0, column=0, padx=(30, 0), pady=10)
         self.bdpl_note_scroll.grid(row=0, column=1, padx=(0, 10), pady=(10, 0), sticky='ns')
 
-        ttk.Button(self.tab_frames_dict['bdpl_note_frame'], text="Save", width=5, command=self.write_technician_note).grid(row=0, column=2, padx=10)
+        tk.Button(self.tab_frames_dict['bdpl_note_frame'], text="Save", width=5, bg='light slate gray', command=self.write_technician_note).grid(row=0, column=2, padx=10)
 
         self.controller.bdpl_failure_notification.set(False)
 
@@ -491,8 +497,8 @@ class BdplIngest(tk.Frame):
             current_barcode.ddrescue_image()
             
             #check DVD for title information
-            drive_letter = "{}\\".format(self.optical_drive_letter())
-            titlecount, title_format = self.lsdvd_check(drive_letter)
+            drive_letter = "{}\\".format(current_barcode.optical_drive_letter())
+            titlecount, title_format = current_barcode.lsdvd_check(drive_letter)
             
             #make surre this isn't PAL formatted: need to figure out solution. 
             if title_format == 'PAL':
@@ -501,7 +507,7 @@ class BdplIngest(tk.Frame):
             
             #if DVD has one or more titles, rip raw streams to .MPG
             if titlecount > 0:
-                self.normalize_dvd_content(titlecount, drive_letter)
+                current_barcode.normalize_dvd_content(titlecount, drive_letter)
             else:
                 print('\nWARNING: DVD does not appear to have any titles; job type should likely be Disk_image.  Manually review disc and re-transfer content if necessary.')
                 return
@@ -509,8 +515,8 @@ class BdplIngest(tk.Frame):
         #CDDA job
         elif current_barcode.job_type == 'CDDA':
             #create a copy of raw pulse code modulated (PCM) audio data and then rip to WAV using cd-paranoia
-            self.cdda_image_creation()
-            self.cdda_wav_creation()
+            current_barcode.cdda_image_creation()
+            current_barcode.cdda_wav_creation()
 
         print('\n\n--------------------------------------------------------------------------------------------------\n\n')
     
@@ -597,10 +603,12 @@ class BdplIngest(tk.Frame):
         if not os.path.exists(current_barcode.sqlite_done) or current_barcode.re_analyze:
             current_barcode.import_csv() # load csv into sqlite db
         
-        '''create statistics/reports and write info to HTML'''
-        stats_done = os.path.join(current_barcode.temp_dir, 'stats_done.txt')
-        if not os.path.exists(stats_done) or current_barcode.re_analyze:
+        '''generate statistics/reports'''
+        if not os.path.exists(self.stats_done) or current_barcode.re_analyze:
             current_barcode.get_stats()
+        
+        '''write info to HTML'''
+        if not os.path.exists(self.new_html) or current_barcode.re_analyze:
             current_barcode.generate_html()
         
         #generate PREMIS preservation metadata file
@@ -672,7 +680,7 @@ class BdplIngest(tk.Frame):
         #create a barcode object and a spreadsheet object
         current_barcode = ItemBarcode(self.controller)
 
-        current_barcode.metadata_dict['technician_note'] = self.controller.bdpl_technician_note.get(1.0, tk.END)
+        current_barcode.metadata_dict['technician_note'] = self.controller.tabs['BdplIngest'].bdpl_technician_note.get(1.0, tk.END)
         
         #additional steps if we are noting failed transfer of item...
         if self.controller.bdpl_failure_notification.get():
@@ -727,7 +735,7 @@ class BdplIngest(tk.Frame):
         self.controller.source_device.set(None)
         
         #reset note text box
-        self.bdpl_technician_note.delete('1.0', tk.END)
+        self.bdpl_technician_note.delete(1.0, tk.END)
 
 class Unit:
     def __init__(self, controller):
@@ -826,6 +834,7 @@ class ItemBarcode(Shipment):
         self.duplicates = os.path.join(self.temp_dir, 'duplicates.txt')
         self.folders_created = os.path.join(self.temp_dir, 'folders-created.txt')
         self.sqlite_done = os.path.join(self.temp_dir, 'sqlite_done.txt')
+        self.stats_done = os.path.join(current_barcode.temp_dir, 'stats_done.txt')
         self.done_file = os.path.join(self.temp_dir, 'done.txt')
         self.checksums_dvd = os.path.join(self.temp_dir, 'checksums_dvd.txt')
         self.checksums = os.path.join(self.temp_dir, 'checksums.txt')
@@ -833,7 +842,6 @@ class ItemBarcode(Shipment):
         #metadata files
         self.dfxml_output = os.path.join(self.metadata_dir, '{}-dfxml.xml'.format(self.item_barcode))
         self.premis_xml_file = os.path.join(self.metadata_dir, '{}-premis.xml'.format(self.item_barcode))
-        
         
         self.metadata_dict = pickle_load(self.temp_dir, 'dict', 'metadata_dict')
         
@@ -899,7 +907,9 @@ class ItemBarcode(Shipment):
             except OSError as exception:
                 if exception.errno != errno.EEXIST:
                     raise
-    
+        #create file so we can check for completion later, if need be
+        open(self.folders_created, 'w').close()
+        
     def verify_analysis_details(self): 
     
         if not self.controller.job_type.get() in ['Copy_only', 'Disk_image', 'CDDA', 'DVD']:
@@ -1450,7 +1460,7 @@ class ItemBarcode(Shipment):
                         continue
                     
                     counter += 1
-                    print('\r\tCalculating checksum for file %d out of %d' % (counter, total), end='')
+                    print('\r\tCalculating checksum for file {} out of {}'.format(counter, total), end='')
                     
                     size = os.path.getsize(file_target)
                     mtime = datetime.datetime.fromtimestamp(os.path.getmtime(file_target)).isoformat()
@@ -1720,7 +1730,7 @@ class ItemBarcode(Shipment):
         drive_id = info[8].split(':')[0]
             
         #get info about CD using cdrdao; record this as a premis event, too.
-        cdrdao_cmd = 'cdrdao disk-info --device {} --driver generic-mmc-raw > {} 2>&1' % (drive_id, self.disk_info_report)
+        cdrdao_cmd = 'cdrdao disk-info --device {} --driver generic-mmc-raw > {} 2>&1'.format(drive_id, self.disk_info_report)
         timestamp = str(datetime.datetime.now())
         exitcode = subprocess.call(cdrdao_cmd, shell=True, text=True)
         
@@ -1927,7 +1937,7 @@ class ItemBarcode(Shipment):
             
             format_version = "DROID v{}".format(subprocess.check_output('droid -v', shell=True, text=True).strip())
             
-            droid_cmd1 = 'droid -RAq -a "{}" -p "{}"' % (self.files_dir, self.droid_profile)
+            droid_cmd1 = 'droid -RAq -a "{}" -p "{}"'.format(self.files_dir, self.droid_profile)
             
             exitcode = subprocess.call(droid_cmd1, shell=True)
             
@@ -1957,7 +1967,7 @@ class ItemBarcode(Shipment):
                 next(csvReader)
                 for row in csvReader:
                     counter+=1
-                    print('\rWorking on row %d' % counter, end='')
+                    print('\rWorking on row {}'.format(counter), end='')
                     
                     if 'zip:file:' in row[2]:
                         filename = row[2].split('zip:file:/', 1)[1].replace('.zip!', '.zip#').replace('/', '\\')
@@ -2146,7 +2156,7 @@ class ItemBarcode(Shipment):
         mime_header = ['MIME type', 'Count']
         self.sqlite_to_csv(sql, path, mime_header, cursor)
         
-        #for dvd jobs, we need to use disk image metadata for dates...
+        #for dvd jobs, we need to use disk image metadata for dates; for CDDA jobs, we can only list date as unknown
         if self.job_type == 'DVD':
             try:
                 with open(self.checksums_dvd, 'rb') as f:
@@ -2154,14 +2164,11 @@ class ItemBarcode(Shipment):
             except FileNotFoundError:
                 pass
                 
-        #For reporting purposes, we want to catch any files whose current 'mtime' was set to the replication in the BDPL process.
+        #For reporting purposes, we want to catch any files whose current 'mtime' was set during replication in the BDPL process.
         premis_list = pickle_load(self.temp_dir, 'ls', 'premis_list')
         
         #first, establish when we ran the replication operation.  If no replication operation, check timestamp of folders we created
-        try:
-            bdpl_time = [p for p in premis_list if p['eventType'] == 'replication'][0]['timestamp'].split('.')[0].replace('T', ' ')
-        except IndexError:
-            bdpl_time = datetime.datetime.fromtimestamp(os.path.getmtime(self.folders_created)).isoformat().replace('T', ' ').split('.')[0]
+        bdpl_time = datetime.datetime.fromtimestamp(os.path.getmtime(self.folders_created)).isoformat().replace('T', ' ').split('.')[0]
         
         bdpl_time = datetime.datetime.strptime(bdpl_time, "%Y-%m-%d %H:%M:%S")
         
@@ -2285,7 +2292,7 @@ class ItemBarcode(Shipment):
         pickle_dump(self.temp_dir, 'metadata_dict', self.metadata_dict)
         
         #create temp file so we can check that this step was already completed
-        open(os.path.join(self.temp_dir, 'stats_done.txt'), 'w').close()
+        open(self.stats_done, 'w').close()
     
     def generate_html(self):
     
@@ -2484,6 +2491,9 @@ class ItemBarcode(Shipment):
                 html_doc.write('\nNone found.\n<br><br>')
             
         else:
+            if not os.path.exists(path):
+                open(path, 'w').close()
+                
             in_file = open(path, 'r', encoding="utf-8")
             # count lines and then return to start of file
             numline = len(in_file.readlines())
@@ -2916,8 +2926,8 @@ class ManualPremisEvent(tk.Toplevel):
             self.barcode_entry = tk.Entry(self.get_info_frame, justify=tk.LEFT, width=50)
             self.barcode_entry.grid(row=0, column=1, padx=(0,10), pady=10, sticky='w')
             
-            ttk.Button(self.get_info_frame, text = 'Use barcode', command=self.add_barcode_value).grid(row=1, column=0, padx=10, pady=10, sticky="nsew")
-            ttk.Button(self.get_info_frame, text = 'Cancel', command=self.close_top).grid(row=1, column=1, padx=10, pady=10, sticky="nsew")
+            tk.Button(self.get_info_frame, text = 'Use barcode', bg='light slate gray', command=self.add_barcode_value).grid(row=1, column=0, padx=10, pady=10, sticky="nsew")
+            tk.Button(self.get_info_frame, text = 'Cancel', bg='light slate gray', command=self.close_top).grid(row=1, column=1, padx=10, pady=10, sticky="nsew")
         
         self.barcode_item = ItemBarcode(self.controller)
 
@@ -2974,8 +2984,8 @@ class ManualPremisEvent(tk.Toplevel):
         
         self.notice = ttk.Label(self.timestamp_frame, text='NOTE: folder contents will be copied to {}'.format(self.barcode_item.files_dir), wraplength=250)
         
-        ttk.Button(self.button_frame, text = 'Save Event', command=self.create_manual_premis_event).grid(row=1, column=1, padx=20, pady=10, sticky="nsew")
-        ttk.Button(self.button_frame, text = 'Quit / Cancel', command=self.close_top).grid(row=1, column=2, padx=20, pady=10, sticky="nsew")
+        tk.Button(self.button_frame, text = 'Save Event', bg='light slate gray', command=self.create_manual_premis_event).grid(row=1, column=1, padx=20, pady=10, sticky="nsew")
+        tk.Button(self.button_frame, text = 'Quit / Cancel', bg='light slate gray', command=self.close_top).grid(row=1, column=2, padx=20, pady=10, sticky="nsew")
         
         self.button_frame.grid_rowconfigure(0, weight=1)
         self.button_frame.grid_rowconfigure(2, weight=1)
@@ -3039,9 +3049,14 @@ class ManualPremisEvent(tk.Toplevel):
         #save info in our 'premis list' for the item 
         self.barcode_item.record_premis(self.timestamp, self.manual_event.get(), 0, self.current_event['event_command'].get(), event_desc, vers)
         
-        #if this is a replication event and we've identified a folder, move the folder
+        #if this is a replication event and we've identified a folder, move the folder.  We will also remove any existing DFXML file
         if self.manual_event.get() == 'replication' and self.timestamp_source.get() == 'folder':
             shutil.move(self.selected_dir, self.barcode_item.files_dir)
+            
+            if os.path.exists(self.barcode_item.dfxml_output):
+                os.remove(self.barcode_item.dfxml_output)
+                
+        print('\nPreservation action ({}) has been succesfully added to PREMIS metadata.')
         
     def close_top(self):
         #close shelve
