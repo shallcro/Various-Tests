@@ -41,6 +41,45 @@ class Unit:
         self.unit_home = os.path.join(self.controller.bdpl_home_dir, self.unit_name)
         self.ingest_dir = os.path.join(self.unit_home, 'ingest')
         self.media_image_dir = os.path.join(self.controller.bdpl_home_dir, 'media-images', self.unit_name)
+        
+    def move_media_images(self):
+        
+        #make sure unit value is not empty and that 
+        if self.unit_name == '':
+            '\n\nError; please make sure you have entered a unit ID abbreviation.'
+            return 
+                
+        if len(os.listdir(self.media_image_dir)) == 0:
+            print('\n\nNo images of media at {}'.format(self.media_image_dir))
+            return
+        
+        # get a list of barcodes in each shipment
+        all_barcode_folders = list(filter(lambda f: os.path.isdir(f), glob.glob('{}\\*\\*'.format(self.unit_home))))
+
+        #list of files with no parent
+        bad_file_list = []
+        
+        #loop through a list of all images in this folder; try to find match in list of barcodes; if not, add to 'bad file list'
+        for f in os.listdir(self.media_image_dir):
+            pic = f.split('-')[0]
+            barcode_folder = [s for s in all_barcode_folders if pic in s]
+            if len(barcode_folder) == 1:
+                media_pics = os.path.join(barcode_folder[0], 'metadata', 'media-image')
+                if not os.path.exists(media_pics):
+                    os.makedirs(media_pics)
+                try:
+                    shutil.move(os.path.join(self.media_image_dir, f), media_pics)
+                except shutil.Error as e:
+                    print('NOTE: ', e)
+                    print('\n\nCheck the media image folder to determine if a file already exists or a filename is being duplicated.')
+            else:
+                bad_file_list.append(f)
+            
+        if len(bad_file_list) > 0:
+            print('\n\nFilenames for the following images do not match current barcodes:\n{}'.format('\n'.join(bad_file_list)))
+            print('\nPlease correct filenames and try again.')
+        else:
+            print('\n\nMedia images successfully copied!')
 
 class Shipment(Unit):
     def __init__(self, controller):
@@ -131,8 +170,9 @@ class ItemBarcode(Shipment):
         self.duplicates = os.path.join(self.temp_dir, 'duplicates.txt')
         self.folders_created = os.path.join(self.temp_dir, 'folders-created.txt')
         self.sqlite_done = os.path.join(self.temp_dir, 'sqlite_done.txt')
-        self.stats_done = os.path.join(current_barcode.temp_dir, 'stats_done.txt')
+        self.stats_done = os.path.join(self.temp_dir, 'stats_done.txt')
         self.done_file = os.path.join(self.temp_dir, 'done.txt')
+        self.final_stats = os.path.join(self.temp_dir, 'final_stats.txt')
         self.checksums_dvd = os.path.join(self.temp_dir, 'checksums_dvd.txt')
         self.checksums = os.path.join(self.temp_dir, 'checksums.txt')
 
@@ -2085,8 +2125,8 @@ class ItemBarcode(Shipment):
         
         temp_file = os.path.join(self.temp_dir, '{}.txt'.format(array_name))
          
-        if not os.path.exists(temp_dir):
-            os.makedirs(temp_dir)
+        if not os.path.exists(self.temp_dir):
+            os.makedirs(self.temp_dir)
             
         with open(temp_file, 'wb') as file:
             pickle.dump(array_instance, file)
@@ -2264,3 +2304,214 @@ class Spreadsheet(Shipment):
 
         #save and close spreadsheet
         self.wb.save(self.spreadsheet)  
+        
+    def check_shipment_progress(self):
+        
+        #verify unit and shipment_date info has been entered
+        if self.unit_name == '' or self.shipment_date == '':
+            '\n\nError; please make sure you have entered a unit ID abbreviation and shipment date.'
+            return 
+        
+        #verify spreadsheet--make sure we only have 1 & that it follows naming conventions
+        status, msg = self.verify_spreadsheet()
+        if not status:
+            print(msg)
+            return
+        
+        self.open_wb()
+        
+        #get list of all barcodes on appraisal spreadsheet
+        app_barcodes = []
+        for col in self.app_ws['A'][1:]:
+            if not col.value is None:
+                app_barcodes.append(str(col.value))
+        
+        #get list of all barcodes on inventory spreadsheet
+        inv_barcodes = {}
+        for col in self.inv_ws['A'][1:]:
+            if not col.value is None:
+                inv_barcodes[str(col.value)] = col.row
+        
+        inv_list = list(inv_barcodes.keys())        
+        
+        #check to see if there are any duplicate barcodes in the inventory; print warning if so
+        duplicate_barcodes = [item for item, count in Counter(inv_list).items() if count > 1]
+        
+        if duplicate_barcodes:
+            print('\n\nWARNING! Inventory contains at least one duplicate barcode:')
+            for dup in duplicate_barcodes:
+                print('\t{}\tRow: {}'.format(dup, inv_barcodes[dup]))
+        
+        current_total = len(inv_list) - len(app_barcodes)
+        
+        items_not_done = list(set(inv_list) - set(app_barcodes))
+        
+        if len(items_not_done) > 0:
+            print('\n\nThe following barcodes require ingest:\n{}'.format('\n'.join(items_not_done)))
+        
+        print('\n\nCurrent status: {} out of {} items have been ingested. \n\n{} remain.'.format(len(app_barcodes), len(inv_list), current_total))
+        
+class ManualPremisEvent(tk.Toplevel):
+    def __init__(self, controller):
+        tk.Toplevel.__init__(self, controller)
+        self.title('BDPL Ingest: Add PREMIS Event')
+        self.iconbitmap(r'C:/BDPL/scripts/favicon.ico')
+        self.protocol('WM_DELETE_WINDOW', self.close_top)
+        
+        self.controller = controller
+        
+        status, msg = self.controller.check_main_vars()
+        if not status:
+            print(msg)
+            self.close_top
+            return
+        
+        #self.db = 
+        
+        if self.controller.get_current_tab() != 'BDPL Ingest' or self.controller.item_barcode.get()=='':
+            self.get_info_frame = tk.Frame(self)
+            self.get_info_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+            
+            self.l = ttk.Label(self.get_info_frame, text='Enter barcode:', anchor='e', justify=tk.RIGHT, width=25)
+            self.l.grid(row=0, column=0, padx=(10,0), pady=10)
+            
+            self.barcode_entry = tk.Entry(self.get_info_frame, justify=tk.LEFT, width=50)
+            self.barcode_entry.grid(row=0, column=1, padx=(0,10), pady=10, sticky='w')
+            
+            tk.Button(self.get_info_frame, text = 'Use barcode', bg='light slate gray', command=self.add_barcode_value).grid(row=1, column=0, padx=10, pady=10, sticky="nsew")
+            tk.Button(self.get_info_frame, text = 'Cancel', bg='light slate gray', command=self.close_top).grid(row=1, column=1, padx=10, pady=10, sticky="nsew")
+        
+        self.barcode_item = ItemBarcode(self.controller)
+
+        self.event_frame = tk.LabelFrame(self, text='Item Barcode: {}'.format(self.controller.item_barcode.get()))
+        self.event_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        self.timestamp_frame = tk.LabelFrame(self, text='Timestamp Information')
+        self.timestamp_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        self.button_frame = tk.Frame(self)
+        self.button_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        
+        self.manual_event = tk.StringVar()
+        self.manual_event.set('')
+        self.manual_event.trace('w', self.update_fields)
+        
+        self.events = {
+            'replication' : 'Created a copy of an object that is, bit-wise, identical to the original.', 
+            'disk image creation' : 'Extracted a disk image from the physical information carrier.',
+            'forensic feature analysis' : 'Forensically analyzed the disk image raw bitstream',
+            'format identification' : 'Determined file format and version numbers for content recorded in the PRONOM format registry.', 
+            'message digest calculation' : 'Extracted information about the structure and characteristics of content, including file checksums.',
+            'metadata extraction' : 'Extracted metadata from the object.',
+            'metadata modification' : 'Corrected file timestamps to match information extracted from disk image.',
+            'normalization' : 'Transformed object to an institutionally supported preservation format.',
+            'virus check' : 'Scanned files for malicious programs.'
+        }
+        
+        self.current_event = {}
+        widgets = {'event_combobox' : 'Select event:', 'event_software' : 'Software name:', 'event_software_version' : 'Version #:', 'event_command' : 'Command / Description:', 'event_description' : 'Describe preservation event:'}
+        
+        r = 0
+        for name_, label_ in widgets.items():
+            l = '{}_label'.format(name_)
+            self.current_event[l] = ttk.Label(self.event_frame, text=label_, anchor='e', justify=tk.RIGHT, width=25)
+            
+            if name_ == 'event_combobox':
+                self.current_event[name_] = ttk.Combobox(self.event_frame, textvariable=self.manual_event, values=list(self.events.keys()), justify=tk.LEFT, width=30)
+                self.current_event[name_].bind("<<ComboboxSelected>>", self.update_fields)
+            else:
+                self.current_event[name_] = tk.Entry(self.event_frame, justify=tk.LEFT, width=50)
+            
+            if name_ != 'event_description':
+                self.current_event[l].grid(row=r, column=0, padx=(10,0), pady=10)
+                self.current_event[name_].grid(row=r, column=1, padx=(0,10), pady=10, sticky='w')               
+            r+=1
+        
+        self.timestamp_source = tk.StringVar()
+        self.timestamp_source.set(None)
+        
+        info = [['Use "now" for timestamp', 'now'], ['Get timestamp from file', 'file'], ['Get timestamp from folder', 'folder']]
+        c = 0
+        for i in info:
+            ttk.Radiobutton(self.timestamp_frame, text = i[0], variable = self.timestamp_source, value = i[1], command=self.get_timestamp).grid(row=c, column=0, padx=10, pady=10, sticky='w')
+            c += 1
+        
+        self.notice = ttk.Label(self.timestamp_frame, text='NOTE: folder contents will be copied to {}'.format(self.barcode_item.files_dir), wraplength=250)
+        
+        tk.Button(self.button_frame, text = 'Save Event', bg='light slate gray', command=self.create_manual_premis_event).grid(row=1, column=1, padx=20, pady=10, sticky="nsew")
+        tk.Button(self.button_frame, text = 'Quit / Cancel', bg='light slate gray', command=self.close_top).grid(row=1, column=2, padx=20, pady=10, sticky="nsew")
+        
+        self.button_frame.grid_rowconfigure(0, weight=1)
+        self.button_frame.grid_rowconfigure(2, weight=1)
+        self.button_frame.grid_columnconfigure(0, weight=1)
+        self.button_frame.grid_columnconfigure(3, weight=1)
+    
+    def add_barcode_value(self):
+        if self.barcode_entry.get() == '':
+            print('\n\nWARNING: Be sure to enter a barcode value')
+            return
+        else:
+            self.controller.item_barcode.set(self.barcode_entry.get().trim())
+            
+        if not Spreadsheet(self.controller).return_inventory_row()[0]:
+            print('\n\nWARNING: Barcode value does not appear in spreadsheet')
+            return
+        else:
+            self.get_info_frame.destroy()
+    
+    def update_fields(self, *args):
+        if self.manual_event.get()=='replication':
+            self.notice.grid(row=2, column=1, columnspan = 3, padx=10, pady=10, sticky='w')
+        else:
+            if self.notice.winfo_ismapped():
+                self.notice.grid_forget()
+                
+        #if user adds a different event, we need to get a description of it.  Add fields.
+        if not self.events.get(self.manual_event.get()):
+            self.current_event['event_description_label'].grid(row=4, column=0, padx=(10,0), pady=10)
+            self.current_event['event_description'].grid(row=4, column=1, columnspan=3, padx=(0,10), pady=10)
+        #If the event is already recognized, we don't need to have extra fields.  Hide them if they exist. 
+        else:
+            if self.current_event['event_description_label'].winfo_ismapped():
+                self.current_event['event_description_label'].grid_forget()
+                self.current_event['event_description'].grid_forget()
+            
+    def get_timestamp(self):
+        if self.timestamp_source.get() == 'now':
+            ts = str(datetime.datetime.now())
+            
+        elif self.timestamp_source.get() == 'folder':
+            self.selected_dir = filedialog.askdirectory(parent=self, initialdir=self.controller.bdpl_home_dir, title='Select a folder to extract timestamp from')
+            ts = datetime.datetime.fromtimestamp(os.path.getmtime(self.selected_dir)).isoformat()
+            
+        elif self.timestamp_source.get() == 'file':
+            selected_file = filedialog.askopenfilename(parent=self, initialdir=self.controller.bdpl_home_dir, title='Select a file to extract timestamp from')
+            ts = datetime.datetime.fromtimestamp(os.path.getmtime(file_)).isoformat()
+        
+        self.timestamp = ts
+        
+    def create_manual_premis_event(self):
+    
+        if not self.events.get(self.manual_event.get()):
+            event_desc = self.current_event['event_description'].get()
+        else:
+            event_desc = self.events[self.manual_event.get()]
+        
+        #concatenate software name and version #
+        vers = '{} v{}'.format(self.current_event['event_software'].get(), self.current_event['event_software_version'].get())
+        
+        #save info in our 'premis list' for the item 
+        self.barcode_item.record_premis(self.timestamp, self.manual_event.get(), 0, self.current_event['event_command'].get(), event_desc, vers)
+        
+        #if this is a replication event and we've identified a folder, move the folder.  We will also remove any existing DFXML file
+        if self.manual_event.get() == 'replication' and self.timestamp_source.get() == 'folder':
+            shutil.move(self.selected_dir, self.barcode_item.files_dir)
+            
+            if os.path.exists(self.barcode_item.dfxml_output):
+                os.remove(self.barcode_item.dfxml_output)
+                
+        print('\nPreservation action ({}) has been succesfully added to PREMIS metadata.')
+        
+    def close_top(self):
+        #close shelve
+        
+        #close window
+        self.destroy()     

@@ -34,7 +34,8 @@ import zipfile
 # from dfxml project
 import Objects
 
-from BdplMainApp import newscreen, close_app
+from BdplObjects import Unit, Shipment, ItemBarcode, Spreadsheet
+from BdplUtilities import *
 
 class BdplIngest(tk.Frame):
     def __init__(self, parent, controller):
