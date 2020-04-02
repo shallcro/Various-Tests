@@ -35,13 +35,13 @@ import zipfile
 import Objects
 
 #BDPL files
-from BdplObjects import Unit, Shipment, ItemBarcode, Spreadsheet, ManualPremisEvent
+from BdplObjects import Unit, Shipment, ItemBarcode, Spreadsheet, ManualPremisEvent, RipstationBatch
 
 #set up as controller
 class BdplMainApp(tk.Tk):
     def __init__(self, bdpl_home_dir):
         tk.Tk.__init__(self)
-
+        self.geometry("+0+0")
         self.title("Indiana University Library Born-Digital Preservation Lab")
         self.iconbitmap(r'C:/BDPL/scripts/favicon.ico')
         self.protocol('WM_DELETE_WINDOW', lambda: close_app(self))
@@ -71,18 +71,23 @@ class BdplMainApp(tk.Tk):
         self.item_description = tk.StringVar()
         self.appraisal_notes = tk.StringVar()
         self.bdpl_instructions = tk.StringVar()
+        
+        #GUI vars for RipstationIngest
+        self.ripstation_ingest_option = tk.StringVar()
+        self.ripstation_log = tk.StringVar()
+        self.ripstation_userdata = tk.StringVar()
 
         #create notebook to start creating app
         self.bdpl_notebook = ttk.Notebook(self)
         self.bdpl_notebook.pack(pady=10, fill=tk.BOTH, expand=True)
 
         #update info on current tab when it's switched
-        self.bdpl_notebook.bind('<<NotebookTabChanged>>', lambda evt: self.get_current_tab)
+        self.bdpl_notebook.bind('<<NotebookTabChanged>>', self.update_tab)
 
         self.tabs = {}
 
         #other tabs: bag_prep, bdpl_to_mco, RipstationIngest
-        app_tabs = {BdplIngest : 'BDPL Ingest', RipstationIngest : 'RipStation Ingest'}
+        app_tabs = {BdplIngest : 'BDPL Ingest',  RipstationIngest : 'RipStation Ingest'}
 
         for tab, description in app_tabs.items():
             tab_name = tab.__name__
@@ -110,6 +115,12 @@ class BdplMainApp(tk.Tk):
     def get_current_tab(self):
         return self.bdpl_notebook.tab(self.bdpl_notebook.select(), 'text')
         
+    def update_tab(self, event):
+        event.widget.update_idletasks()
+
+        tab = event.widget.nametowidget(event.widget.select())
+        event.widget.configure(height=tab.winfo_reqheight())
+        
     def check_main_vars(self):
         if self.unit_name.get() == '':
             return (False, '\n\nERROR: please make sure you have entered a unit ID abbreviation.')
@@ -135,11 +146,68 @@ class BdplMainApp(tk.Tk):
         #create a manual PREMIS object
         new_premis_event = ManualPremisEvent(self)   
         
+    def update_combobox(self, combobox):
+        if self.unit_name.get() == '':
+            combobox_list = []
+        else:
+            unit_home = os.path.join(self.bdpl_home_dir, self.unit_name.get(), 'ingest')
+            combobox_list = glob.glob1(unit_home, '*')
+
+        combobox['values'] = combobox_list
+        
+    def clear_gui(self):        
+        
+        newscreen()
+        
+        #reset all text fields/labels        
+        self.content_source_type.set('')
+        self.collection_title.set('')
+        self.collection_creator.set('')
+        self.item_title.set('')
+        self.label_transcription.set('')
+        self.item_description.set('')
+        self.appraisal_notes.set('')
+        self.bdpl_instructions.set('')
+        self.item_barcode.set('')
+        self.path_to_content.set('')
+        self.other_device.set('')
+        
+        self.ripstation_log.set('')
+        self.ripstation_userdata.set('')
+        
+        #reset 5.25" floppy disk type
+        self.disk_525_type.set('N/A')
+        
+        #reset checkbuttons
+        self.bdpl_failure_notification.set(False)
+        self.re_analyze.set(False)
+        self.media_attached.set(False)
+        
+        #reset radio buttons
+        self.job_type.set(None)
+        self.source_device.set(None)
+        self.ripstation_ingest_option.set(None)
+        
+        #reset note text box
+        self.tabs['BdplIngest'].bdpl_technician_note.delete(1.0, tk.END)
+        
+    def check_list(self, list_name, item_barcode):
+        if not os.path.exists(list_name):
+            return False
+        with open(list_name, 'r') as f:
+            for item in f:
+                if item_barcode in item.strip():
+                    return True
+                else:
+                    continue
+            return False
+        
 class BdplIngest(tk.Frame):
     def __init__(self, parent, controller):
 
         #create main frame in notebook
         tk.Frame.__init__(self, parent)
+        self.config(height=700)
         self.pack(fill=tk.BOTH, expand=True)
 
         self.parent = parent
@@ -165,7 +233,7 @@ class BdplIngest(tk.Frame):
         for label_, width_, var_ in entry_fields:
             if label_ == 'Shipment date:':
                 ttk.Label(self.tab_frames_dict['batch_info_frame'], text=label_).pack(padx=(20,0), pady=10, side=tk.LEFT)
-                self.date_combobox = ttk.Combobox(self.tab_frames_dict['batch_info_frame'], width=20, textvariable=var_, postcommand = self.update_combobox)
+                self.date_combobox = ttk.Combobox(self.tab_frames_dict['batch_info_frame'], width=20, textvariable=var_, postcommand = lambda: self.controller.update_combobox(self.date_combobox))
                 self.date_combobox.pack(padx=10, pady=10, side=tk.LEFT)
             else:
                 ttk.Label(self.tab_frames_dict['batch_info_frame'], text=label_).pack(padx=(20,0), pady=10, side=tk.LEFT)
@@ -234,7 +302,7 @@ class BdplIngest(tk.Frame):
             button_id[b] = button
 
         #now use button instances to assign commands
-        button_id['New'].config(command = self.clear_gui)
+        button_id['New'].config(command = self.controller.clear_gui)
         button_id['Load'].config(command = self.launch_session)
         button_id['Transfer'].config(command = self.launch_transfer)
         button_id['Analyze'].config(command = self.launch_analysis)
@@ -294,15 +362,6 @@ class BdplIngest(tk.Frame):
                 self.controller.source_device.set('/dev/sr0')
             else:
                 self.controller.source_device.set(None)
-
-    def update_combobox(self):
-        if self.controller.unit_name.get() == '':
-            combobox_list = []
-        else:
-            unit_home = os.path.join(self.controller.bdpl_home_dir, self.controller.unit_name.get(), 'ingest')
-            combobox_list = glob.glob1(unit_home, '*')
-
-        self.date_combobox['values'] = combobox_list
 
     def launch_session(self):
         newscreen()
@@ -610,50 +669,151 @@ class BdplIngest(tk.Frame):
         current_spreadsheet.write_to_spreadsheet(current_barcode.metadata_dict)
         
         print('\n\nInformation saved to Appraisal worksheet.') 
-        
-    def clear_gui(self):
-        #self.controller = controller
-        
-        newscreen()
-        #reset all text fields/labels        
-        self.controller.content_source_type.set('')
-        self.controller.collection_title.set('')
-        self.controller.collection_creator.set('')
-        self.controller.item_title.set('')
-        self.controller.label_transcription.set('')
-        self.controller.item_description.set('')
-        self.controller.appraisal_notes.set('')
-        self.controller.bdpl_instructions.set('')
-        self.controller.item_barcode.set('')
-        self.controller.path_to_content.set('')
-        self.controller.other_device.set('')
-        
-        #reset 5.25" floppy disk type
-        self.controller.disk_525_type.set('N/A')
-        
-        #reset checkbuttons
-        self.controller.bdpl_failure_notification.set(False)
-        self.controller.re_analyze.set(False)
-        self.controller.media_attached.set(False)
-        
-        #reset radio buttons
-        self.controller.job_type.set(None)
-        self.controller.source_device.set(None)
-        
-        #reset note text box
-        self.bdpl_technician_note.delete(1.0, tk.END)
   
 class RipstationIngest(tk.Frame):
     def __init__(self, parent, controller):
 
         #create main frame in notebook
         tk.Frame.__init__(self, parent)
+        self.config(height=300)
         self.pack(fill=tk.BOTH, expand=True)
 
         self.parent = parent
-        self.controller = controller  
+        self.controller = controller
+
+        '''
+        CREATE FRAMES!
+        '''
+        tab_frames_list = [('batch_info_frame', 'Basic Information:'), ('job_type_frame', 'Select Job Type:'), ('path_frame', 'Path to RipStation log and userdata.txt files:'), ('button_frame', 'BDPL RipStation Ingest Actions:')]
+
+        self.tab_frames_dict = {}
+
+        for name_, label_ in tab_frames_list:
+            f = tk.LabelFrame(self, text = label_)
+            f.pack(fill=tk.BOTH, expand=True, pady=5)
+            self.tab_frames_dict[name_] = f
+
+        '''
+        BATCH INFORMATION FRAME: includes entry fields to capture unit and shipment date
+        '''
+        entry_fields = [('Unit:', self.controller.unit_name), ('Shipment date:', self.controller.shipment_date)]
+
+        ttk.Label(self.tab_frames_dict['batch_info_frame'], text='Unit:').pack(padx=(20,0), pady=10, side=tk.LEFT)
+        e = ttk.Entry(self.tab_frames_dict['batch_info_frame'], width=5, textvariable=self.controller.unit_name)
+        e.pack(padx=10, pady=10, side=tk.LEFT)
         
+        ttk.Label(self.tab_frames_dict['batch_info_frame'], text='Shipment date:').pack(padx=(20,0), pady=10, side=tk.LEFT)
+        self.date_combobox = ttk.Combobox(self.tab_frames_dict['batch_info_frame'], width=20, textvariable=self.controller.shipment_date, postcommand = lambda: self.controller.update_combobox(self.date_combobox))
+        self.date_combobox.pack(padx=10, pady=10, side=tk.LEFT)
+            
+        '''
+        RIPSTATION JOB OPTIONS
+        '''
+        radio_buttons = [('Compact Disc Digital Audio', 'CDs'), ('DVD/Data discs', 'DVD_Data')]
         
+        self.controller.ripstation_ingest_option.set(None)
+        
+        for k, v in radio_buttons:
+            ttk.Radiobutton(self.tab_frames_dict['job_type_frame'], text = k, variable = self.controller.ripstation_ingest_option, value = v, command = self.set_ripstation_ingest_options).pack(side=tk.LEFT, padx=40, pady=5)
+        
+        '''
+        LOG FILE / USERDATA PATH FRAME: entry box to display directory path and button to launch askfiledialog
+        '''
+        button_id = {}
+        r = 0
+        for name, var in {'Log file:' : self.controller.ripstation_log, 'userdata.txt:' : self.controller.ripstation_log}.items():
+        
+            ttk.Label(self.tab_frames_dict['path_frame'], width=10, text=name, anchor='e', justify=tk.RIGHT).grid(row=r, column=0, padx=(20, 5), pady=5)
+            
+            e = ttk.Entry(self.tab_frames_dict['path_frame'], width=60, textvariable=var)
+            e.grid(row=r, column=1, padx=(5, 20), pady=5)
+
+            b = tk.Button(self.tab_frames_dict['path_frame'], text='Browse', bg='light slate gray')
+            b.grid(row=r, column=2, padx=(5, 20), pady=5)
+            
+            button_id[name] = b
+            
+            r+=1
+        
+        button_id['Log file:'].config(command=self.log_browse)
+        button_id['userdata.txt:'].config(command=self.userdata_browse)
+        
+        '''
+        BUTTON FRAME: buttons for BDPL RipStation Ingest actions
+        '''
+        button_id = {}
+        buttons = ['New', 'Load', 'Launch Batch', 'Quit']
+
+        for b in buttons:
+            button = tk.Button(self.tab_frames_dict['button_frame'], text=b, bg='light slate gray', width = 15)
+            button.pack(side=tk.LEFT, padx=20, pady=10)
+
+            button_id[b] = button
+
+        #now use button instances to assign commands
+        button_id['New'].config(command = self.controller.clear_gui)
+        button_id['Load'].config(command = self.launch_ripstation_session)
+        button_id['Launch Batch'].config(command = self.launch_ripstation_ingest)
+        button_id['Quit'].config(command = lambda: close_app(self.controller))
+            
+    def set_ripstation_ingest_options(self):
+        if self.controller.ripstation_ingest_option.get() == 'CDs':
+            self.controller.job_type.set('CDDA')
+        else:
+            pass
+    
+    def log_browse(self):
+        
+        current_shipment = Shipment(self.controller)
+        
+        if os.path.exists(current_shipment.ship_dir):
+            target_dir = current_shipment.ship_dir
+        else:
+            target_dir = self.controller.bdpl_home_dir
+        
+        self.controller.ripstation_log = filedialog.askopenfilename(parent=self, initialdir=target_dir, title='Select RipStation log file')
+        
+    def userdata_browse(self):
+        
+        current_shipment = Shipment(self.controller)
+        
+        if os.path.exists(current_shipment.ship_dir):
+            target_dir = current_shipment.ship_dir
+        else:
+            target_dir = self.controller.bdpl_home_dir
+        
+        self.controller.ripstation_userdata = filedialog.askopenfilename(parent=self, initialdir=target_dir, title='Select RipStation userdata.txt file')
+        
+    def launch_ripstation_session(self):
+        
+        #make sure we have all required variables
+        if not os.path.exists(self.controller.ripstation_log.get()):
+            print('\n\nWARNING: select RipStation log file before continuing')
+            return
+        
+        if not os.path.exists(self.controller.ripstation_userdata.get()):
+            print('\n\nWARNING: select RipStation userdata.txt file before continuing')
+            return
+            
+        status, msg = self.controller.check_main_vars()
+        if not status:
+            print(msg)
+            return
+        
+        #set up Batch object and create folder
+        current_batch = RipstationBatch(self.controller)
+        current_batch.set_up()
+    
+    def launch_ripstation_ingest(self):
+        
+        current_batch = RipstationBatch(self.controller)
+        
+        if not os.path.exists(current_batch.ripstation_reports):
+            print('\n\nWARNING: load RipStation batch infortmation before launching batch ingest.')
+            return
+        
+        current_batch.ripstation_batch_ingest()
+
 def close_app(window):
     window.destroy()
     sys.exit(0)

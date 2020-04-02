@@ -2515,3 +2515,55 @@ class ManualPremisEvent(tk.Toplevel):
         
         #close window
         self.destroy()     
+        
+class RipstationBatch(Shipment):
+    def __init__(self, controller):
+        Shipment.__init__(self, controller)
+        
+        self.controller = controller 
+        self.ripstation_userdata = self.contoller.ripstation_userdata.get()
+        self.ripstation_log = self.controller.ripstation_log.get()
+        
+        self.ripstation_reports = os.path.join(self.ship_dir, 'ripstation_reports')
+        
+        #reports
+        self.failed_ingest_report = os.path.join(self.ripstation_reports, 'failed_ingest_ripstation.txt')
+        self.replicated_report = os.path.join(self.ripstation_reports, 'replicated_ripstation.txt')
+        self.analyzed_report = os.path.join(self.ripstation_reports, 'analyzed_ripstation.txt')
+        
+        #get a timestamp for ripstation batch
+        self.rs_timestamp = datetime.datetime.fromtimestamp(os.path.getmtime(self.ripstation_log)).strftime('%Y-%m-%d')
+        
+        #get a list of barcodes; save to variable
+        if os.path.exists(self.ripstation_userdata):
+            with open(self.ripstation_userdata, 'r') as ud:
+                self.batch_barcodes = ud.read().splitlines()
+        
+    def set_up(self):
+        #set up reports dir
+        if not os.path.exists(self.ripstation_reports):
+            os.makedirs(self.ripstation_reports)
+          
+    def ripstation_batch_ingest(self):
+        
+        #loop through our list of barcodes
+        for item in self.batch_barcodes:
+            
+            print('\nWorking on item: {}'.format(item))
+            
+            #set our barcode variable and create barcode object
+            self.controller.item_barcode.set(item)
+            current_barcode = ItemBarcode(self.controller)
+            
+            #if item has already failed, skip it.
+            if self.controller.check_list(self.failed_ingest_report, current_barcode.item_barcode):
+                print('\nThis item previously failed.  Moving on to next item...')
+                continue
+                    
+    def clean_up(self):
+        
+        #move log and userdata file to ripstation_reports
+        
+        pass
+        
+        
