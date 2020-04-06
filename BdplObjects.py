@@ -43,10 +43,10 @@ class Unit:
         self.media_image_dir = os.path.join(self.controller.bdpl_home_dir, 'media-images', self.unit_name)
         
     def move_media_images(self):
-        
+    
         #make sure unit value is not empty and that 
         if self.unit_name == '':
-            '\n\nError; please make sure you have entered a unit ID abbreviation.'
+            print('\n\nError; please make sure you have entered a unit ID abbreviation.')
             return 
                 
         if len(os.listdir(self.media_image_dir)) == 0:
@@ -87,8 +87,8 @@ class Shipment(Unit):
         self.controller = controller
         self.shipment_date = self.controller.shipment_date.get()
         self.ship_dir = os.path.join(self.ingest_dir, self.shipment_date)
-        self.spreadsheet = os.path.join(self.ship_dir, '{}_{}.xlsx'.format(self.unit_name, self.shipment_date))
-
+        self.spreadsheet = os.path.join(self.ship_dir, '{}_{}.xlsx'.format(self.unit_name, self.shipment_date)) 
+            
     def verify_spreadsheet(self):
         #check what is in the shipment dir
         found = glob.glob(os.path.join(self.ship_dir, '*.xlsx'))
@@ -182,6 +182,56 @@ class ItemBarcode(Shipment):
         
         self.metadata_dict = self.pickle_load('dict', 'metadata_dict')
         
+        #special vars for RipstationBatch
+        if self.controller.get_current_tab() == 'RipStation Ingest':
+            self.rs_wav_file = os.path.join(self.files_dir, "{}.wav".format(self.item_barcode))
+            self.rs_wav_cue = os.path.join(self.files_dir, "{}.cue".format(self.item_barcode))
+            self.rs_cdr_bin = os.path.join(self.image_dir, "{}-01.bin".format(self.item_barcode))
+            self.rs_cdr_toc = os.path.join(self.image_dir, "{}-01.toc".format(self.item_barcode))
+            self.rs_cdr_cue = os.path.join(self.image_dir, "{}-01.cue".format(self.item_barcode))
+            self.ripstation_item_log = os.path.join(self.log_dir, 'ripstation.txt')
+            self.ripstation_orig_imagefile = os.path.join(self.image_dir, '{}.iso'.format(self.item_barcode))
+        
+    def prep_barcode(self):
+        
+        current_spreadsheet = Spreadsheet(self.controller)
+
+        #verify spreadsheet--make sure we only have 1 & that it follows naming conventions
+        if self.controller.get_current_tab() == 'BDPL Ingest':
+            status, msg = current_spreadsheet.verify_spreadsheet()
+            if not status:
+                return (status, msg)
+
+        #make sure spreadsheet is not open
+        if current_spreadsheet.already_open():
+            return (False, '\n\nWARNING: {} is currently open.  Close file before continuing and/or contact digital preservation librarian if other users are involved.'.format(current_spreadsheet.spreadsheet))
+            
+        #open spreadsheet and make sure current item exists in spreadsheet; if not, return
+        current_spreadsheet.open_wb()
+        status, row = current_spreadsheet.return_inventory_row()
+        if not status:
+            return (False, '\n\nWARNING: barcode was not found in spreadsheet.  Make sure value is entered correctly and/or check spreadsheet for value.  Consult with digital preservation librarian as needed.')
+        
+        #load metadata into item object
+        self.load_item_metadata(current_spreadsheet, row)
+        
+        #assign variables to GUI
+        if self.controller.get_current_tab() == 'BDPL Ingest':
+            self.controller.content_source_type.set(self.metadata_dict['content_source_type'])
+            self.controller.collection_title.set(self.metadata_dict['collection_title'])
+            self.controller.collection_creator.set(self.metadata_dict['collection_creator'])
+            self.controller.item_title.set(self.metadata_dict.get('item_title', '-'))
+            self.controller.label_transcription.set(self.metadata_dict['label_transcription'])
+            self.controller.item_description.set(self.metadata_dict.get('item_description', '-'))
+            self.controller.appraisal_notes.set(self.metadata_dict['appraisal_notes'])
+            self.controller.bdpl_instructions.set(self.metadata_dict['bdpl_instructions'])
+        
+        #create folders
+        if not self.check_ingest_folders(): 
+            self.create_folders() 
+        
+        return (True, '\n\nRecord loaded successfully; ready for next operation.')
+    
     def check_barcode_status(self):
         #If a 'done' file exists, we know the whole process was completed
         done_file = os.path.join(self.temp_dir, 'done.txt')
@@ -249,6 +299,15 @@ class ItemBarcode(Shipment):
         
     def verify_analysis_details(self): 
     
+        #make sure main variables--unit_name, shipment_date, and barcode--are included.  Return if either is missing
+        status, msg = self.controller.check_main_vars()
+        if not status:
+            return (status, msg)
+        
+        #make sure we have already initiated a session for this barcode
+        if not self.check_ingest_folders():
+            return (False, '\n\nWARNING: load record before proceeding')
+        
         if not self.controller.job_type.get() in ['Copy_only', 'Disk_image', 'CDDA', 'DVD']:
             return (False, '\nWARNING: Indicate the appropriate job type for this item and then run transfer again.')
         else:
@@ -261,6 +320,7 @@ class ItemBarcode(Shipment):
         return (True, 'Ready to analyze!')
     
     def verify_transfer_details(self):
+
         if self.controller.job_type.get() is None:
             return (False, '\nWARNING: Indicate the appropriate job type for this item and then run transfer again.')
             
@@ -582,7 +642,7 @@ class ItemBarcode(Shipment):
         
         #Proceed if any file systems were found; return if none identified
         if len(fs_list) > 0:
-            print('\n\tDisktype has identified the following file system: ', ', '.join(fs_list))
+            print('\n\tDisktype has identified the following file system(s): ', ', '.join(fs_list))
             
             #now check for any partitions; if none, go ahead and use teracopy, tsk_recover, or unhfs depending on the file system
             if len(partition_info_list) <= 1:
@@ -590,7 +650,15 @@ class ItemBarcode(Shipment):
                 print('\n\tNo partition information...')
                 
                 if any(fs in ' '.join(fs_list) for fs in secure_copy_list):
-                    self.secure_copy(self.optical_drive_letter())
+                    if self.controller.get_current_tab() == 'RipStation Ingest':
+                        os.rename(self.imagefile, self.ripstation_orig_imagefile)
+                        self.mount_iso()
+                        drive_letter = self.get_iso_drive_letter()
+                        self.secure_copy(drive_letter)
+                        self.dismount_iso()
+                        os.rename(self.ripstation_orig_imagefile, self.imagefile)
+                    else:
+                        self.secure_copy(self.optical_drive_letter())
 
                 elif any(fs in ' '.join(fs_list) for fs in unhfs_list):
                     self.carve_files('unhfs', unhfs_tool_ver, '', self.files_dir)
@@ -1685,9 +1753,9 @@ class ItemBarcode(Shipment):
         elif self.job_type == 'DVD':
             html_doc.write('\n<p><strong>Input source: DVD-Video (optical disc)</strong></p>')
         elif self.job_type == 'CDDA':
-            html_doc.write('\n<p><strong>Input source: Compact Disc Digital Audio</strong></p>')
+            html_doc.write('\n<p><strong>Input source: Compact Disc Digital Audio (optical disc)</strong></p>')
         elif self.job_type == 'Disk_image':
-            html_doc.write('\n<p><strong>Input source: Physical media</strong></p>')
+            html_doc.write('\n<p><strong>Input source: Physical media: {}</strong></p>'.format(self.metadata_dict.get('content_source_type', 'Unidentified')))
             
         html_doc.write('\n<p><strong>Item identifier:</strong> {}</p>'.format(self.item_barcode))
         html_doc.write('\n</div>')
@@ -2167,6 +2235,198 @@ class ItemBarcode(Shipment):
         
         #if no files found, return false
         return False
+        
+    def mount_iso(self):
+        print('\nMOUNTING .ISO DISK IMAGE FILE...')
+        cmd = "Mount-DiskImage -ImagePath '%s'" % self.ripstation_orig_imagefile
+        exitcode = subprocess.call('powershell "{}" > null 2>&1'.format(cmd))
+        
+        return exitcode
+        
+    def dismount_iso(self):
+        print('\nDISMOUNTING DISK IMAGE FILE...')
+        cmd = "Dismount-DiskImage -ImagePath '{}'".format(self.ripstation_orig_imagefile)
+        exitcode = subprocess.call('powershell "{}" > null 2>&1'.format(cmd))
+        
+        return exitcode
+        
+    def get_iso_drive_letter(self):
+        cmd = "(Get-DiskImage '{}' | Get-Volume).DriveLetter".format(self.ripstation_orig_imagefile)
+        drive_letter = '{}:\\'.format(subprocess.check_output('powershell "%s"' % cmd, text=True).rstrip())
+        
+        return drive_letter
+    
+    def run_item_transfer(self):
+    
+        #Copy only job
+        if current_barcode.job_type == 'Copy_only':
+            current_barcode.secure_copy(current_barcode.path_to_content)
+        
+        #Disk image job type
+        elif current_barcode.job_type == 'Disk_image':
+            if current_barcode.source_device == '5.25':
+                    current_barcode.fc5025_image()
+            else:
+                current_barcode.ddrescue_image()
+                
+            #next, get technical metadata from disk image and replicate files so we can run additional analyses (this step will also involve creating DFXML and correcting MAC times)
+            current_barcode.disk_image_info()
+            current_barcode.disk_image_replication()
+        
+        #DVD job
+        elif current_barcode.job_type == 'DVD':
+
+            current_barcode.ddrescue_image()
+            
+            #check DVD for title information
+            drive_letter = "{}\\".format(current_barcode.optical_drive_letter())
+            titlecount, title_format = current_barcode.lsdvd_check(drive_letter)
+            
+            #make surre this isn't PAL formatted: need to figure out solution. 
+            if title_format == 'PAL':
+                print('\n\nWARNING: DVD is PAL formatted! Notify digital preservation librarian so we can configure approprioate ffmpeg command; set disc aside for now...')
+                return
+            
+            #if DVD has one or more titles, rip raw streams to .MPG
+            if titlecount > 0:
+                current_barcode.normalize_dvd_content(titlecount, drive_letter)
+            else:
+                print('\nWARNING: DVD does not appear to have any titles; job type should likely be Disk_image.  Manually review disc and re-transfer content if necessary.')
+                return
+        
+        #CDDA job
+        elif current_barcode.job_type == 'CDDA':
+            #create a copy of raw pulse code modulated (PCM) audio data and then rip to WAV using cd-paranoia
+            current_barcode.cdda_image_creation()
+            current_barcode.cdda_wav_creation()
+
+        print('\n\n--------------------------------------------------------------------------------------------------\n\n')
+        
+    def run_item_analysis(self):
+        
+        
+        '''run antivirus'''
+        print('\nVIRUS SCAN: clamscan.exe')
+        if self.check_premis('virus check') and not self.re_analyze:
+            print('\n\tVirus scan already completed; moving on to next step...')
+        else:
+            self.run_antivirus()
+    
+        '''create DFXML (if not already done so)'''
+        if self.check_premis('message digest calculation') and not self.re_analyze:
+            print('\n\nDIGITAL FORENSICS XML CREATION:')
+            print('\n\tDFXML already created; moving on to next step...')
+        else:
+            if self.job_type == 'Disk_image':
+                #DFXML creation for disk images will depend on the image's file system; check fs_list
+                fs_list = self.pickle_load('ls', 'fs_list')
+                
+                #if it's an HFS+ file system, we can use fiwalk on the disk image; otherwise, use bdpl_ingest on the file directory
+                if 'hfs+' in [fs.lower() for fs in fs_list]:
+                    self.produce_dfxml(self.imagefile)
+                else:
+                    self.produce_dfxml(self.files_dir)
+            
+            elif self.job_type == 'Copy_only':
+                self.produce_dfxml(self.files_dir)
+            
+            elif self.job_type == 'DVD':
+                self.produce_dfxml(self.imagefile)
+            
+            elif self.job_type == 'CDDA':
+                self.produce_dfxml(self.image_dir)
+                
+            '''document directory structure'''
+            print('\n\nDOCUMENTING FOLDER/FILE STRUCTURE: TREE')
+            if self.check_premis('metadata extraction') and not self.re_analyze:
+                print('\n\tDirectory structure already documented with tree command; moving on to next step...')
+            else:
+                self.document_dir_tree() 
+        
+        '''run bulk_extractor to identify potential sensitive information (only if disk image or copy job type). Skip if b_e was run before'''
+        print('\n\nSENSITIVE DATA SCAN: BULK_EXTRACTOR')
+        if self.check_premis('sensitive data scan') and not self.re_analyze:
+            print('\n\tSensitive data scan already completed; moving on to next step...')
+        else:
+            if self.job_type in ['Copy_only', 'Disk_image']:
+                self.run_bulkext()
+            else:
+                print('\n\tSensitive data scan not required for DVD-Video or CDDA content; moving on to next step...')
+                
+        '''run siegfried to characterize file formats'''
+        print('\n\nFILE FORMAT ANALYSIS')
+        if self.check_premis('format identification') and not self.re_analyze:
+            print('\n\tFile format analysis already completed; moving on to next operation...')
+        else:
+            self.format_analysis()
+        
+        #load siegfried.csv into sqlite database; skip if it's already completed
+        if not os.path.exists(self.sqlite_done) or self.re_analyze:
+            self.import_csv() # load csv into sqlite db
+        
+        '''generate statistics/reports'''
+        if not os.path.exists(self.stats_done) or self.re_analyze:
+            self.get_stats()
+        
+        '''write info to HTML'''
+        if not os.path.exists(self.new_html) or self.re_analyze:
+            self.generate_html()
+        
+        #generate PREMIS preservation metadata file
+        self.print_premis()
+        
+        #write info to spreadsheet for collecting unit to review.  Create a spreadsheet object, make sure spreadsheet isn't already open, and if OK, proceed to open and write info.
+        current_spreadsheet = Spreadsheet(self.controller)
+        
+        if current_spreadsheet.already_open():
+            print('\n\nWARNING: {} is currently open.  Close file before continuing and/or contact digital preservation librarian if other users are involved.'.format(current_spreadsheet.spreadsheet))
+            return
+        
+        current_spreadsheet.open_wb()
+        current_spreadsheet.write_to_spreadsheet(self.metadata_dict)
+           
+        #create file to indicate that process was completed
+        if not os.path.exists(self.done_file):
+            open(self.done_file, 'a').close()
+            
+        #copy in .CSS and .JS files for HTML report
+        if os.path.exists(self.assets_target):
+            pass
+        else:
+            shutil.copytree(self.assets_dir, self.assets_target)
+        
+        '''clean up; delete disk image folder if empty and remove temp_html'''
+        try:
+            os.rmdir(self.image_dir)
+        except (WindowsError, PermissionError):
+            pass
+
+        # remove temp html file
+        try:
+            os.remove(self.temp_html)
+        except WindowsError:
+            pass
+        
+        '''if using gui, print final details about item'''
+        if self.controller.get_current_tab() == 'BDPL Ingest':
+            print('\n\n--------------------------------------------------------------------------------------------------\n\nINGEST PROCESS COMPLETED FOR ITEM {}\n\nResults:\n'.format(self.item_barcode))
+            
+            du_cmd = 'du64.exe -nobanner "{}" > {}'.format(self.files_dir, self.final_stats)
+            
+            subprocess.call(du_cmd, shell=True, text=True)   
+            
+            if os.path.exists(self.image_dir):
+                di_count = len(os.listdir(self.image_dir))
+                if di_count > 0:
+                    print('Disk Img(s):   {}'.format(di_count))
+            du_list = ['Files:', 'Directories:', 'Size:', 'Size on disk:']
+            with open(self.final_stats, 'r') as f:
+                for line, term in zip(f.readlines(), du_list):
+                    if "Directories:" in term:
+                        print(term, ' ', str(int(line.split(':')[1]) - 1).rstrip())
+                    else: 
+                        print(term, line.split(':')[1].rstrip())
+            print('\n\nReady for next item!') 
  
 class Spreadsheet(Shipment):
     def __init__(self, controller):
@@ -2214,7 +2474,7 @@ class Spreadsheet(Shipment):
                     found = True
                     break   
         return found, row    
-    
+             
     def get_spreadsheet_columns(self, ws):
 
         spreadsheet_columns = {}
@@ -2309,7 +2569,7 @@ class Spreadsheet(Shipment):
         
         #verify unit and shipment_date info has been entered
         if self.unit_name == '' or self.shipment_date == '':
-            '\n\nError; please make sure you have entered a unit ID abbreviation and shipment date.'
+            print('\n\nError; please make sure you have entered a unit ID abbreviation and shipment date.')
             return 
         
         #verify spreadsheet--make sure we only have 1 & that it follows naming conventions
@@ -2523,6 +2783,7 @@ class RipstationBatch(Shipment):
         self.controller = controller 
         self.ripstation_userdata = self.contoller.ripstation_userdata.get()
         self.ripstation_log = self.controller.ripstation_log.get()
+        self.ripstation_ingest_option = self.controller.ripstation_ingest_option.get()
         
         self.ripstation_reports = os.path.join(self.ship_dir, 'ripstation_reports')
         
@@ -2533,11 +2794,10 @@ class RipstationBatch(Shipment):
         
         #get a timestamp for ripstation batch
         self.rs_timestamp = datetime.datetime.fromtimestamp(os.path.getmtime(self.ripstation_log)).strftime('%Y-%m-%d')
-        
+            
         #get a list of barcodes; save to variable
-        if os.path.exists(self.ripstation_userdata):
-            with open(self.ripstation_userdata, 'r') as ud:
-                self.batch_barcodes = ud.read().splitlines()
+        with open(self.ripstation_userdata, 'r') as ud:
+            self.batch_barcodes = ud.read().splitlines()
         
     def set_up(self):
         #set up reports dir
@@ -2554,12 +2814,241 @@ class RipstationBatch(Shipment):
             #set our barcode variable and create barcode object
             self.controller.item_barcode.set(item)
             current_barcode = ItemBarcode(self.controller)
-            
+                
             #if item has already failed, skip it.
             if self.controller.check_list(self.failed_ingest_report, current_barcode.item_barcode):
                 print('\nThis item previously failed.  Moving on to next item...')
                 continue
+                
+            #prep barcode; proceed to next item if any errors
+            if not self.controller.check_list(self.replicated_report, current_barcode.item_barcode):
+                
+                print('\nLOADING METADATA AND CREATING FOLDERS...')
+                
+                status, msg = current_barcode.prep_barcode()
+                if not status:
+                    self.controller.write_list(self.failed_ingest_report, '{}\t{}'.format(current_barcode.item_barcode, msg))
+                    continue
+                
+                if self.ripstation_ingest_option == 'CDs':
+                    #set job_type
+                    current_barcode.job_type = 'CDDA'
                     
+                    #make sure .WAV and .CUE file were produced
+                    try:
+                        current_barcode.orig_rs_cue = glob.glob(os.path.join(current_barcode.files_dir, '*.cue'))[0]
+                    except IndexError:
+                        print("\nMissing '.cue' file; moving on to next item...")
+                        self.controller.write_list(self.failed_ingest_report, '{}\tMissing .cue file'.format(current_barcode.item_barcode))
+                        continue
+                    
+                    if not os.path.exists(current_barcode.rs_wav_file):
+                        print("\nMissing '.wav' file; moving on to next item...")
+                        self.controller.write_list(self.failed_ingest_report, '{}\tMissing .wav file'.format(current_barcode.item_barcode))
+                        continue
+                    
+                    #write premis information for creating WAV; we assume that this operation was successful
+                    timestamp = datetime.datetime.fromtimestamp(os.path.getmtime(current_barcode.rs_wav_file)).isoformat()
+                    
+                    current_barcode.record_premis(timestamp, 'normalization', 0, 'RipStation BR6-7604 batch .WAV file creation', 'Transformed object to an institutionally supported preservation format (.WAV).', 'RipStation V4.4.13.0')
+                    
+                    #save ripstation log information for disc to log_dir.  Have to get album # from txt file...
+                    txt_file = glob.glob(os.path.join(current_barcode.files_dir, '*.txt'))[0]
+                    
+                    album_number = os.path.splitext(os.path.basename(txt_file))[0]
+
+                    with open(current_barcode.ripstation_item_log, 'w') as outf:
+                        outf.write('RipStation V4.4.13.0\n')
+                        with open(self.ripstation_log, 'r') as inf:
+                            for line in inf.read().splitlines():
+                                if album_number in line:
+                                    outf.write('{} {}\n'.format(self.rs_timestamp, line))
+                    
+                    print('\nSTEP 1: FORMAT NORMALIZATION TO .BIN\n\n')
+                    
+                    #get info about wav file
+                    cmd = 'ffprobe -i {} -hide_banner -show_streams -select_streams a'.format(self.rs_wav_file)
+                    
+                    audio_info = subprocess.check_output(cmd, shell=True, text=True).split('\n')
+                    
+                    audio_dict = {}
+                    
+                    for a in audio_info:
+                        if '=' in a:
+                            audio_dict[a.split('=')[0]] = a.split('=')[1]
+                    
+                    sample_rate = audio_dict['sample_rate']
+                    channels = audio_dict['channels']
+                    
+                    #now create bin file with raw 16 bit little-endian PCM 
+                    cmd = 'ffmpeg -y -i {} -hide_banner -ar {} -ac {} -f s16le -acodec pcm_s16le {}'.format(current_barcode.rs_wav_file, sample_rate, channels, current_barcode.rs_cdr_bin)
+                    
+                    timestamp = str(datetime.datetime.now())
+                    exitcode_bin = subprocess.call(cmd, shell=True)
+                    
+                    ffmpeg_ver = '; '.join(subprocess.check_output('"C:\\Program Files\\ffmpeg\\bin\\ffmpeg" -version', shell=True, text=True).splitlines()[0:2])
+               
+                    current_barcode.record_premis(timestamp, 'normalization', exitcode_bin, cmd, 'Transformed object to an institutionally supported preservation format (.BIN)', ffmpeg_ver)
+                    
+                    #correct cue file; save to file_dir.  
+                    with open(current_barcode.rs_wav_cue, 'w') as outfile:
+                        with open(current_barcode.orig_rs_cue, 'r') as infile:
+                            for line in infile.readlines():
+                                if line.startswith('FILE'):
+                                    outfile.write(line.replace('WAV1', 'WAVE'))
+                                elif line.startswith('  TRACK') or line.startswith('    INDEX'):
+                                    outfile.write(line)
+                    
+                    #copy corrected cue file to image_dir; correct FILE reference
+                    with open(current_barcode.rs_cdr_cue, 'w') as outfile:
+                        with open(current_barcode.rs_wav_cue, 'r') as infile:
+                            for line in infile.readlines():
+                                if line.startswith('FILE'):
+                                    outfile.write('FILE "{}" BINARY\n'.format(os.path.basename(current_barcode.rs_cdr_bin)))
+                                elif line.startswith('  TRACK') or line.startswith('    INDEX'):
+                                    outfile.write(line)
+                    
+                    #remove original cue and txt file        
+                    os.remove(current_barcode.orig_rs_cue)
+                    os.remove(txt_file)
+                    
+                    #create toc file
+                    cue2toc_ver = subprocess.check_output('cue2toc -v', text=True).split('\n')[0]
+                    timestamp = str(datetime.datetime.now())
+                    cmd = 'cue2toc -o {} {}'.format(current_barcode.rs_cdr_toc, current_barcode.rs_cdr_cue)
+                    exitcode = subprocess.call(cmd, shell=True, text=True)
+                    
+                    #record premis
+                    current_barcode.record_premis(timestamp, 'metadata modification', exitcode, cmd, "Converted the CD's .CUE file to the table of contents (.TOC) format.", cue2toc_ver)
+                    
+                    #record successful completion
+                    self.controller.write_list(self.replicated_report, current_barcode.item_barcode)
+                    
+                elif self.ripstation_ingest_option == 'DVD_Data':
+                    
+                    #make sure we can account for our original .ISO imagefile
+                    if not os.path.exists(current_barcode.ripstation_orig_imagefile):
+                    
+                        if os.path.exists(current_barcode.imagefile):
+                            print('\n.ISO file already changed to .DD; converting back to complete operations.')
+                            os.rename(current_barcode.imagefile, current_barcode.ripstation_orig_imagefile)
+                            
+                        elif os.path.exists(os.path.join(current_barcode.image_dir, '{}.mdf'.format(current_barcode.item_barcode))):
+                            print('\nWARNING: item is Compact Disc Digital Audio; unable to transfer using RipStation DataGrabber.')
+                            self.controller.write_list(self.failed_ingest_report, '{}\tDisc is CDDA; transfer using original RipStation'.format(current_barcode.item_barcode))
+                            continue
+                            
+                        else:
+                            print('\nWARNING: disk image does not exist!  Moving on to next item...')
+                            self.controller.write_list(self.failed_ingest_report, '{}\tDisk image does not exist'.format(current_barcode.item_barcode))
+                            continue
+                    
+                    #write premis information for disk image creation.  Even if image is unreadable, we assume that this operation was successful
+                    timestamp = datetime.datetime.fromtimestamp(os.path.getmtime(current_barcode.ripstation_orig_imagefile)).isoformat()
+                    
+                    current_barcode.record_premis(timestamp, 'disk image creation', 0, 'RipStation BR6-7604 ISO image batch operation', 'Extracted a disk image from the physical information carrier.', 'RipStation DataGrabber V1.0.35.0')
+                    
+                    #save ripstation log information for disc to log_dir.  Make sure it's only written once...
+                    with open(current_barcode.ripstation_item_log, 'w') as outf:
+                        outf.write('RipStation DataGrabber V1.0.35.0\n')
+                        with open(self.ripstation_log, 'r') as inf:
+                            for line in inf.read().splitlines():
+                                if current_barcode.item_barcode in line:
+                                    outf.write('{} {}\n' % (self.rs_timestamp, line))
+                    
+                    #mount .ISO so we can verify disk image type
+                    exitcode = current_barcode.mount_iso()
+                    if exitcode != 0:
+                        print('\nWARNING: failed to mount disk image!  Moving on to next item...')
+                        self.controller.write_list(self.failed_ingest_report, '{}\tFailed to mount disk image'.format(current_barcode.item_barcode))
+                        continue
+                    
+                    #set media_attached variable to true: confirms that 'media' (mounted disk image) is present; required by bdpl_ingest functions
+                    self.controller.media_attached.set(True)
+                    current_barcode.media_attached = self.controller.media_attached.get()
+                    
+                    #get drive letter for newly mounted disk image
+                    drive_letter = current_barcode.get_iso_drive_letter()
+                    
+                    #run lsdvd to determine if job_type is DVD or Disk_image
+                    print('\nCHECKING IF DISC IS DATA OR DVD-VIDEO...')
+                    titlecount, title_format = lsdvd_check(folders, item_barcode, drive_letter)
+                    
+                    #fail if disc is PAL-formatted
+                    if title_format == 'PAL':
+                        print('\nWARNING: PAL-formatted DVD; need to develop appropriate procedures...')
+                        self.controller.write_list(self.failed_ingest_report, '{}\tFailed replication: PAL-formatted DVD'.format(current_barcode.item_barcode))
+                        continue
+                    
+                    if titlecount == 0:
+                        current_barcode.job_type = 'Disk_image'
+                        
+                        #dismount disk image
+                        exitcode = current_barcode.dismount_iso()
+                        if exitcode != 0:
+                            print('\nWARNING: failed to dismount disk image!  Moving on to next item...')
+                            self.controller.write_list(self.failed_ingest_report, '{}\tFailed to dismount disk image'.format(current_barcode.item_barcode))
+                            continue
+                        
+                        #rename to '.dd' file extension
+                        timestamp = str(datetime.datetime.now())
+                        
+                        os.rename(current_barcode.ripstation_orig_imagefile, current_barcode.imagefile)
+                        
+                        #document change to filename
+                        current_barcode.record_premis(timestamp, 'filename change', 0, 'os.rename({}, {})'.format(current_barcode.ripstation_orig_imagefile, current_barcode.imagefile), 'Modified the filename, changing extension from .ISO to .DD to ensure consistency with IUL BDPL practices', 'Python %s' % sys.version.split()[0])
+                    
+                        #next, get technical metadata from disk image and replicate files so we can run additional analyses (this step will also involve creating DFXML and correcting MAC times)
+                        current_barcode.disk_image_info()
+                        current_barcode.disk_image_replication()
+                    
+                    else:
+                        current_barcode.job_type = 'DVD'
+                        
+                        current_barcode.normalize_dvd_content(titlecount, drive_letter)
+                        
+                        #dismount disk image
+                        print('\nDISMOUNTING DISK IMAGE FILE...') 
+                        exitcode = current_barcode.dismount_iso()
+                        if exitcode != 0:
+                            print('\nWARNING: failed to dismount disk image!  Moving on to next item...')
+                            self.controller.write_list(self.failed_ingest_report, '{}\tFailed to dismount disk image'.format(current_barcode.item_barcode))
+                            continue
+                            
+                        #rename to '.dd' file extension
+                        os.rename(current_barcode.ripstation_orig_imagefile, current_barcode.imagefile)
+                    
+                    #record successful status if files exist; otherwise note failure
+                    if current_barcode.check_files(current_barcode.files_dir):
+                        self.controller.write_list(self.replicated_report, current_barcode.item_barcode)
+                    else:
+                        print('\nWARNING: failed to replicate files!  Moving on to next item...')
+                        self.controller.write_list(self.failed_ingest_report, '{}\tFailed to replicate files'.format(current_barcode.item_barcode))
+                        continue
+            
+            if not self.controller.check_list(self.analyzed_report, current_barcode.item_barcode):
+                current_barcode.run_item_analysis()
+                
+                #check procedures
+                jobs = ['virus check', 'metadata extraction', 'message digest calculation', 'format identification']
+                
+                if current_barcode.job_type == 'Disk_image':
+                    jobs.append('sensitive data scan')
+                
+                failed_analysis_jobs = []
+
+                for job in jobs:
+                    if not current_barcode.check_premis(job):
+                        failed_analysis_jobs.append(job)
+                
+                if len(failed_analysis_jobs) > 0:
+                    print('\nWARNING: analysis did not complete with:\n\t{}'.format('\n\t'.join(failed_analysis_jobs)))
+                    self.controller.write_list(self.failed_ingest_report, '{}\tFailed analysis job(s): {}'.format(current_barcode.item_barcode, ', '.join(failed_analysis_jobs)))
+                    continue
+                else:
+                    self.controller.write_list(self.analyzed_report, current_barcode.item_barcode)
+                        
+                        
     def clean_up(self):
         
         #move log and userdata file to ripstation_reports

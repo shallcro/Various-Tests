@@ -102,9 +102,9 @@ class BdplMainApp(tk.Tk):
        
         self.actions_ = tk.Menu(self.menubar)
         self.menubar.add_cascade(menu=self.actions_, label='Other actions')
-        self.actions_.add_command(label='Check shipment status', command= lambda: Spreadsheet(self).check_shipment_progress)
+        self.actions_.add_command(label='Check shipment status', command=self.shipment_status)
         self.actions_.add_separator()
-        self.actions_.add_command(label='Move media images', command= lambda: Unit(self).move_media_images)
+        self.actions_.add_command(label='Move media images', command=self.media_images)
         self.actions_.add_separator()
         self.actions_.add_command(label='Add Manual PREMIS event', command= lambda: ManualPremisEvent(self))
         
@@ -133,8 +133,27 @@ class BdplMainApp(tk.Tk):
             if self.item_barcode.get() == '':
                 return (False, '\n\nERROR: please make sure you have entered a barcode value.')
                 
+        #if RipStation job, make sure essential info/files are identified
+        elif self.get_current_tab() == 'RipStation Ingest':
+            if not os.path.exists(self.ripstation_log.get()):
+                return (False, '\n\nERROR: select RipStation log file before continuing')
+            
+            if not os.path.exists(self.ripstation_userdata.get()):
+                return (False, '\n\nERROR: select RipStation userdata.txt file before continuing')
+                
+            if not self.ripstation_ingest_option.get() in ['CDs', 'DVD_Data']:
+                return (False, '\n\nERROR: select RipStation job option before continuing.')
+                
         #if we get through the above, then we are good to go!
         return (True, 'Unit name and shipment date included.')
+        
+    def shipment_status(self):
+        current_spreadsheet = Spreadsheet(self)
+        current_spreadsheet.check_shipment_progress()
+        
+    def media_images(self):
+        current_unit = Unit(self)  
+        current_unit.move_media_images()
         
     def add_manual_premis_event(self): 
         #make sure main variables--unit_name, shipment_date, and barcode--are included.  Return if either is missing
@@ -191,6 +210,10 @@ class BdplMainApp(tk.Tk):
         #reset note text box
         self.tabs['BdplIngest'].bdpl_technician_note.delete(1.0, tk.END)
         
+        if self.get_current_tab() == 'RipStation Ingest':
+            self.unit_name.set('')
+            self.shipment_date.set('')
+        
     def check_list(self, list_name, item_barcode):
         if not os.path.exists(list_name):
             return False
@@ -201,6 +224,10 @@ class BdplMainApp(tk.Tk):
                 else:
                     continue
             return False
+            
+    def write_list(self, list_name, message):
+        with open(list_name, 'a') as f:
+            f.write('%s\n' % message)
         
 class BdplIngest(tk.Frame):
     def __init__(self, parent, controller):
@@ -364,6 +391,8 @@ class BdplIngest(tk.Frame):
                 self.controller.source_device.set(None)
 
     def launch_session(self):
+        #Standard BDPL Ingest item-based workflow
+        
         newscreen()
         
         #make sure main variables--unit_name, shipment_date, and barcode--are included.  Return if either is missing
@@ -371,139 +400,41 @@ class BdplIngest(tk.Frame):
         if not status:
             print(msg)
             return
+
+        #create a barcode object and a spreadsheet object
+        current_barcode = ItemBarcode(self.controller)
         
-        #Standard BDPL Ingest item-based workflow
-        if self.controller.get_current_tab() == 'BDPL Ingest':
-
-            #create a barcode object and a spreadsheet object
-            current_barcode = ItemBarcode(self.controller)
-            current_spreadsheet = Spreadsheet(self.controller)
-
-            #verify spreadsheet--make sure we only have 1 & that it follows naming conventions
-            status, msg = current_spreadsheet.verify_spreadsheet()
-            if not status:
-                print(msg)
-                return
-
-            #make sure spreadsheet is not open
-            if current_spreadsheet.already_open():
-                print('\n\nWARNING: {} is currently open.  Close file before continuing and/or contact digital preservation librarian if other users are involved.'.format(current_spreadsheet.spreadsheet))
-                return
-                
-            #open spreadsheet and make sure current item exists in spreadsheet; if not, return
-            current_spreadsheet.open_wb()
-            status, row = current_spreadsheet.return_inventory_row()
-            if not status:
-                print('\n\nWARNING: barcode was not found in spreadsheet.  Make sure value is entered correctly and/or check spreadsheet for value.  Consult with digital preservation librarian as needed.')
-                return
-            
-            #load metadata into item object
-            current_barcode.load_item_metadata(current_spreadsheet, row)
-            
-            #assign variables to GUI
-            self.controller.content_source_type.set(current_barcode.metadata_dict['content_source_type'])
-            self.controller.collection_title.set(current_barcode.metadata_dict['collection_title'])
-            self.controller.collection_creator.set(current_barcode.metadata_dict['collection_creator'])
-            self.controller.item_title.set(current_barcode.metadata_dict.get('item_title', '-'))
-            self.controller.label_transcription.set(current_barcode.metadata_dict['label_transcription'])
-            self.controller.item_description.set(current_barcode.metadata_dict.get('item_description', '-'))
-            self.controller.appraisal_notes.set(current_barcode.metadata_dict['appraisal_notes'])
-            self.controller.bdpl_instructions.set(current_barcode.metadata_dict['bdpl_instructions'])
-            
-            #create folders
-            if not current_barcode.check_ingest_folders(): 
-                current_barcode.create_folders() 
-                
-            #check status
-            current_barcode.check_barcode_status()
-            
-            print('\n\nRecord loaded successfully; ready for next operation.')
-    
-    def launch_transfer(self):
-
-        print('\n\nSTEP 1. TRANSFER CONTENT')
-        
-        #make sure main variables--unit_name, shipment_date, and barcode--are included.  Return if either is missing
-        status, msg = self.controller.check_main_vars()
+        status, msg = current_barcode.prep_barcode()
         if not status:
             print(msg)
             return
+            
+        #check status
+        current_barcode.check_barcode_status()
         
+        print('\n\nRecord loaded successfully; ready for next operation.')
+    
+    def launch_transfer(self):
+    
+        print('\n\nSTEP 1. TRANSFER CONTENT')
+
         #create a barcode object and job object
         current_barcode = ItemBarcode(self.controller)
-        
-        #make sure we have already initiated a session for this barcode
-        if not current_barcode.check_ingest_folders():
-            print('\n\nWARNING: load record before proceeding')
-            return
-        
+
         #make sure transfer details have been correctly entered
         status, msg = current_barcode.verify_transfer_details()
         if not status:
             print(msg)
             return
-            
-        #Copy only job
-        if current_barcode.job_type == 'Copy_only':
-            current_barcode.secure_copy(current_barcode.path_to_content)
         
-        #Disk image job type
-        elif current_barcode.job_type == 'Disk_image':
-            if current_barcode.source_device == '5.25':
-                    current_barcode.fc5025_image()
-            else:
-                current_barcode.ddrescue_image()
-                
-            #next, get technical metadata from disk image and replicate files so we can run additional analyses (this step will also involve creating DFXML and correcting MAC times)
-            current_barcode.disk_image_info()
-            current_barcode.disk_image_replication()
-        
-        #DVD job
-        elif current_barcode.job_type == 'DVD':
-
-            current_barcode.ddrescue_image()
-            
-            #check DVD for title information
-            drive_letter = "{}\\".format(current_barcode.optical_drive_letter())
-            titlecount, title_format = current_barcode.lsdvd_check(drive_letter)
-            
-            #make surre this isn't PAL formatted: need to figure out solution. 
-            if title_format == 'PAL':
-                print('\n\nWARNING: DVD is PAL formatted! Notify digital preservation librarian so we can configure approprioate ffmpeg command; set disc aside for now...')
-                return
-            
-            #if DVD has one or more titles, rip raw streams to .MPG
-            if titlecount > 0:
-                current_barcode.normalize_dvd_content(titlecount, drive_letter)
-            else:
-                print('\nWARNING: DVD does not appear to have any titles; job type should likely be Disk_image.  Manually review disc and re-transfer content if necessary.')
-                return
-        
-        #CDDA job
-        elif current_barcode.job_type == 'CDDA':
-            #create a copy of raw pulse code modulated (PCM) audio data and then rip to WAV using cd-paranoia
-            current_barcode.cdda_image_creation()
-            current_barcode.cdda_wav_creation()
-
-        print('\n\n--------------------------------------------------------------------------------------------------\n\n')
+        current_barcode.run_item_transfer()
     
     def launch_analysis(self):
         
         print('\n\nSTEP 2. CONTENT ANALYSIS')
         
-        #make sure main variables--unit_name, shipment_date, and barcode--are included.  Return if either is missing
-        status, msg = self.controller.check_main_vars()
-        if not status:
-            print(msg)
-            return
-        
         #create a barcode object
         current_barcode = ItemBarcode(self.controller)
-        
-        #make sure we have already initiated a session for this barcode
-        if not current_barcode.check_ingest_folders():
-            print('\n\nWARNING: load record before proceeding')
-            return
         
         #make sure transfer details have been correctly entered
         status, msg = current_barcode.verify_analysis_details()
@@ -511,128 +442,8 @@ class BdplIngest(tk.Frame):
             print(msg)
             return
             
-        '''run antivirus'''
-        print('\nVIRUS SCAN: clamscan.exe')
-        if current_barcode.check_premis('virus check') and not current_barcode.re_analyze:
-            print('\n\tVirus scan already completed; moving on to next step...')
-        else:
-            current_barcode.run_antivirus()
-    
-        '''create DFXML (if not already done so)'''
-        if current_barcode.check_premis('message digest calculation') and not current_barcode.re_analyze:
-            print('\n\nDIGITAL FORENSICS XML CREATION:')
-            print('\n\tDFXML already created; moving on to next step...')
-        else:
-            if current_barcode.job_type == 'Disk_image':
-                #DFXML creation for disk images will depend on the image's file system; check fs_list
-                fs_list = current_barcode.pickle_load('ls', 'fs_list')
-                
-                #if it's an HFS+ file system, we can use fiwalk on the disk image; otherwise, use bdpl_ingest on the file directory
-                if 'hfs+' in [fs.lower() for fs in fs_list]:
-                    current_barcode.produce_dfxml(current_barcode.imagefile)
-                else:
-                    current_barcode.produce_dfxml(current_barcode.files_dir)
-            
-            elif current_barcode.job_type == 'Copy_only':
-                current_barcode.produce_dfxml(current_barcode.files_dir)
-            
-            elif current_barcode.job_type == 'DVD':
-                current_barcode.produce_dfxml(current_barcode.imagefile)
-            
-            elif current_barcode.job_type == 'CDDA':
-                current_barcode.produce_dfxml(current_barcode.image_dir)
-                
-            '''document directory structure'''
-            print('\n\nDOCUMENTING FOLDER/FILE STRUCTURE: TREE')
-            if current_barcode.check_premis('metadata extraction') and not current_barcode.re_analyze:
-                print('\n\tDirectory structure already documented with tree command; moving on to next step...')
-            else:
-                current_barcode.document_dir_tree() 
-        
-        '''run bulk_extractor to identify potential sensitive information (only if disk image or copy job type). Skip if b_e was run before'''
-        print('\n\nSENSITIVE DATA SCAN: BULK_EXTRACTOR')
-        if current_barcode.check_premis('sensitive data scan') and not current_barcode.re_analyze:
-            print('\n\tSensitive data scan already completed; moving on to next step...')
-        else:
-            if current_barcode.job_type in ['Copy_only', 'Disk_image']:
-                current_barcode.run_bulkext()
-            else:
-                print('\n\tSensitive data scan not required for DVD-Video or CDDA content; moving on to next step...')
-                
-        '''run siegfried to characterize file formats'''
-        print('\n\nFILE FORMAT ANALYSIS')
-        if current_barcode.check_premis('format identification') and not current_barcode.re_analyze:
-            print('\n\tFile format analysis already completed; moving on to next operation...')
-        else:
-            current_barcode.format_analysis()
-        
-        #load siegfried.csv into sqlite database; skip if it's already completed
-        if not os.path.exists(current_barcode.sqlite_done) or current_barcode.re_analyze:
-            current_barcode.import_csv() # load csv into sqlite db
-        
-        '''generate statistics/reports'''
-        if not os.path.exists(current_barcode.stats_done) or current_barcode.re_analyze:
-            current_barcode.get_stats()
-        
-        '''write info to HTML'''
-        if not os.path.exists(current_barcode.new_html) or current_barcode.re_analyze:
-            current_barcode.generate_html()
-        
-        #generate PREMIS preservation metadata file
-        current_barcode.print_premis()
-        
-        #write info to spreadsheet for collecting unit to review.  Create a spreadsheet object, make sure spreadsheet isn't already open, and if OK, proceed to open and write info.
-        current_spreadsheet = Spreadsheet(self.controller)
-        
-        if current_spreadsheet.already_open():
-            print('\n\nWARNING: {} is currently open.  Close file before continuing and/or contact digital preservation librarian if other users are involved.'.format(current_spreadsheet.spreadsheet))
-            return
-        
-        current_spreadsheet.open_wb()
-        current_spreadsheet.write_to_spreadsheet(current_barcode.metadata_dict)
-           
-        #create file to indicate that process was completed
-        if not os.path.exists(current_barcode.done_file):
-            open(current_barcode.done_file, 'a').close()
-            
-        #copy in .CSS and .JS files for HTML report
-        if os.path.exists(current_barcode.assets_target):
-            pass
-        else:
-            shutil.copytree(current_barcode.assets_dir, current_barcode.assets_target)
-        
-        '''clean up; delete disk image folder if empty and remove temp_html'''
-        try:
-            os.rmdir(current_barcode.image_dir)
-        except (WindowsError, PermissionError):
-            pass
-
-        # remove temp html file
-        try:
-            os.remove(current_barcode.temp_html)
-        except WindowsError:
-            pass
-        
-        '''if using gui, print final details about item'''
-        if self.controller.get_current_tab() == 'BDPL Ingest':
-            print('\n\n--------------------------------------------------------------------------------------------------\n\nINGEST PROCESS COMPLETED FOR ITEM {}\n\nResults:\n'.format(current_barcode.item_barcode))
-            
-            du_cmd = 'du64.exe -nobanner "{}" > {}'.format(current_barcode.files_dir, current_barcode.final_stats)
-            
-            subprocess.call(du_cmd, shell=True, text=True)   
-            
-            if os.path.exists(current_barcode.image_dir):
-                di_count = len(os.listdir(current_barcode.image_dir))
-                if di_count > 0:
-                    print('Disk Img(s):   {}'.format(di_count))
-            du_list = ['Files:', 'Directories:', 'Size:', 'Size on disk:']
-            with open(current_barcode.final_stats, 'r') as f:
-                for line, term in zip(f.readlines(), du_list):
-                    if "Directories:" in term:
-                        print(term, ' ', str(int(line.split(':')[1]) - 1).rstrip())
-                    else: 
-                        print(term, line.split(':')[1].rstrip())
-            print('\n\nReady for next item!') 
+        #run analysis on item
+        current_barcode.run_item_analysis()
     
     def write_technician_note(self):
         
@@ -707,14 +518,14 @@ class RipstationIngest(tk.Frame):
         self.date_combobox.pack(padx=10, pady=10, side=tk.LEFT)
             
         '''
-        RIPSTATION JOB OPTIONS
+        RIPSTATION JOB OPTIONS FRAME
         '''
         radio_buttons = [('Compact Disc Digital Audio', 'CDs'), ('DVD/Data discs', 'DVD_Data')]
         
         self.controller.ripstation_ingest_option.set(None)
         
         for k, v in radio_buttons:
-            ttk.Radiobutton(self.tab_frames_dict['job_type_frame'], text = k, variable = self.controller.ripstation_ingest_option, value = v, command = self.set_ripstation_ingest_options).pack(side=tk.LEFT, padx=40, pady=5)
+            ttk.Radiobutton(self.tab_frames_dict['job_type_frame'], text = k, variable = self.controller.ripstation_ingest_option, value = v).pack(side=tk.LEFT, padx=40, pady=5)
         
         '''
         LOG FILE / USERDATA PATH FRAME: entry box to display directory path and button to launch askfiledialog
@@ -742,7 +553,7 @@ class RipstationIngest(tk.Frame):
         BUTTON FRAME: buttons for BDPL RipStation Ingest actions
         '''
         button_id = {}
-        buttons = ['New', 'Load', 'Launch Batch', 'Quit']
+        buttons = ['New', 'Launch Batch', 'Quit']
 
         for b in buttons:
             button = tk.Button(self.tab_frames_dict['button_frame'], text=b, bg='light slate gray', width = 15)
@@ -752,16 +563,9 @@ class RipstationIngest(tk.Frame):
 
         #now use button instances to assign commands
         button_id['New'].config(command = self.controller.clear_gui)
-        button_id['Load'].config(command = self.launch_ripstation_session)
-        button_id['Launch Batch'].config(command = self.launch_ripstation_ingest)
+        button_id['Launch Batch'].config(command = self.launch_ripstation_session)
         button_id['Quit'].config(command = lambda: close_app(self.controller))
             
-    def set_ripstation_ingest_options(self):
-        if self.controller.ripstation_ingest_option.get() == 'CDs':
-            self.controller.job_type.set('CDDA')
-        else:
-            pass
-    
     def log_browse(self):
         
         current_shipment = Shipment(self.controller)
@@ -786,31 +590,21 @@ class RipstationIngest(tk.Frame):
         
     def launch_ripstation_session(self):
         
-        #make sure we have all required variables
-        if not os.path.exists(self.controller.ripstation_log.get()):
-            print('\n\nWARNING: select RipStation log file before continuing')
-            return
-        
-        if not os.path.exists(self.controller.ripstation_userdata.get()):
-            print('\n\nWARNING: select RipStation userdata.txt file before continuing')
-            return
-            
+        #must check variables before we create a batch object
         status, msg = self.controller.check_main_vars()
         if not status:
             print(msg)
             return
         
-        #set up Batch object and create folder
+        #make sure we have our shipment spreadsheet
+        status, msg = Shipment(self.controller).verify_spreadsheet
+        if not status:
+            print(msg)
+            return
+        
+        #set up Batch object, create folder
         current_batch = RipstationBatch(self.controller)
         current_batch.set_up()
-    
-    def launch_ripstation_ingest(self):
-        
-        current_batch = RipstationBatch(self.controller)
-        
-        if not os.path.exists(current_batch.ripstation_reports):
-            print('\n\nWARNING: load RipStation batch infortmation before launching batch ingest.')
-            return
         
         current_batch.ripstation_batch_ingest()
 
