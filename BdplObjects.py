@@ -88,6 +88,7 @@ class Shipment(Unit):
         self.shipment_date = self.controller.shipment_date.get()
         self.ship_dir = os.path.join(self.ingest_dir, self.shipment_date)
         self.spreadsheet = os.path.join(self.ship_dir, '{}_{}.xlsx'.format(self.unit_name, self.shipment_date)) 
+        self.bdpl_master_spreadsheet = self.controller.bdpl_master_spreadsheet
             
     def verify_spreadsheet(self):
         #check what is in the shipment dir
@@ -208,7 +209,7 @@ class ItemBarcode(Shipment):
             
         #open spreadsheet and make sure current item exists in spreadsheet; if not, return
         current_spreadsheet.open_wb()
-        status, row = current_spreadsheet.return_inventory_row()
+        status, row = current_spreadsheet.return_row(current_spreadsheet.inv_ws)
         if not status:
             return (False, '\n\nWARNING: barcode was not found in spreadsheet.  Make sure value is entered correctly and/or check spreadsheet for value.  Consult with digital preservation librarian as needed.')
         
@@ -258,7 +259,7 @@ class ItemBarcode(Shipment):
                     self.metadata_dict[key] = current_spreadsheet.inv_ws.cell(row=item_row, column=ws_columns[key]).value
 
         #now check if we need to update with any info from appraisal worksheet
-        status, row = current_spreadsheet.return_appraisal_row()        
+        status, row = current_spreadsheet.return_row(current_spreadsheet.app_ws)        
         if status:
             ws_columns = current_spreadsheet.get_spreadsheet_columns(current_spreadsheet.app_ws)
         
@@ -2429,17 +2430,26 @@ class ItemBarcode(Shipment):
             print('\n\nReady for next item!') 
  
 class Spreadsheet(Shipment):
-    def __init__(self, controller):
+    def __init__(self, controller, master=None):
         Shipment.__init__(self, controller)
         
         self.controller = controller        
         self.item_barcode = self.controller.item_barcode.get()
+        
+        if master:
+            self.spreadsheet = self.bdpl_master_spreadsheet
     
-    def open_wb(self):
+    def open_wb(self, master=None):
         self.wb = openpyxl.load_workbook(self.spreadsheet)
-        self.inv_ws = self.wb['Inventory']
-        self.app_ws = self.wb['Appraisal']
-        self.info_ws = self.wb['Basic_Transfer_Information']
+        
+        if master:
+            item_ws = self.wb['Item']
+            cumulative_ws = self.wb['Cumulative']
+        else:
+            self.wb = openpyxl.load_workbook(self.spreadsheet)
+            self.inv_ws = self.wb['Inventory']
+            self.app_ws = self.wb['Appraisal']
+            self.info_ws = self.wb['Basic_Transfer_Information']
     
     def already_open(self):
         temp_file = os.path.join(os.path.dirname(self.spreadsheet), '~${}'.format(os.path.basename(self.spreadsheet)))
@@ -2448,32 +2458,21 @@ class Spreadsheet(Shipment):
         else:
             return False
     
-    def return_inventory_row(self):
+    def return_row(self, ws):
         #set initial Boolean value to false; change to True if barcode is found
         found = False
-        row = ''
-        
-        #if barcode exists in spreadsheet, set variable to that row
-        for cell in self.inv_ws['A']:
-            if (cell.value is not None):
-                if self.item_barcode == str(cell.value).strip():
-                    row = cell.row
-                    found = True
-                    break
-        return found, row
-    
-    def return_appraisal_row(self):
-        #Initially set row to next open one; if barcode is found, return its existing row
-        found = False
         row = self.app_ws.max_row+1
-
-        for cell in self.app_ws['A']:
-            if (cell.value is not None):
-                if self.item_barcode == str(cell.value).strip():
-                    row = cell.row
-                    found = True
-                    break   
-        return found, row    
+        
+        if ws.title in ['Inventory', 'Appraisal']:
+            #if barcode exists in spreadsheet, set variable to that row
+            for cell in ws['A']:
+                if (cell.value is not None):
+                    if self.item_barcode == str(cell.value).strip():
+                        row = cell.row
+                        found = True
+                        break
+                        
+        return found, row  
              
     def get_spreadsheet_columns(self, ws):
 
@@ -2554,7 +2553,7 @@ class Spreadsheet(Shipment):
         
     def write_to_spreadsheet(self, metadata_dict):
     
-        status, current_row = self.return_appraisal_row()
+        status, current_row = self.return_row(self.app_ws)
         
         ws_cols = self.get_spreadsheet_columns(self.app_ws)
     
@@ -2710,8 +2709,11 @@ class ManualPremisEvent(tk.Toplevel):
             return
         else:
             self.controller.item_barcode.set(self.barcode_entry.get().trim())
-            
-        if not Spreadsheet(self.controller).return_inventory_row()[0]:
+        
+        current_spreadsheet = Spreadsheet(self.controller)
+        current_spreadsheet.open_wb('shipment')
+        
+        if not current_spreadsheet.return_row(current_spreadsheet.inv_ws)[0]:
             print('\n\nWARNING: Barcode value does not appear in spreadsheet')
             return
         else:
