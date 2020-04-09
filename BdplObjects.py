@@ -38,9 +38,9 @@ class Unit:
     def __init__(self, controller):
         self.controller = controller
         self.unit_name = self.controller.unit_name.get()
-        self.unit_home = os.path.join(self.controller.bdpl_home_dir, self.unit_name)
+        self.unit_home = os.path.join(self.controller.bdpl_work_dir, self.unit_name)
         self.ingest_dir = os.path.join(self.unit_home, 'ingest')
-        self.media_image_dir = os.path.join(self.controller.bdpl_home_dir, 'media-images', self.unit_name)
+        self.media_image_dir = os.path.join(self.controller.bdpl_work_dir, 'media-images', self.unit_name)
         
     def move_media_images(self):
     
@@ -2260,28 +2260,28 @@ class ItemBarcode(Shipment):
     def run_item_transfer(self):
     
         #Copy only job
-        if current_barcode.job_type == 'Copy_only':
-            current_barcode.secure_copy(current_barcode.path_to_content)
+        if self.job_type == 'Copy_only':
+            self.secure_copy(self.path_to_content)
         
         #Disk image job type
-        elif current_barcode.job_type == 'Disk_image':
-            if current_barcode.source_device == '5.25':
-                    current_barcode.fc5025_image()
+        elif self.job_type == 'Disk_image':
+            if self.source_device == '5.25':
+                    self.fc5025_image()
             else:
-                current_barcode.ddrescue_image()
+                self.ddrescue_image()
                 
             #next, get technical metadata from disk image and replicate files so we can run additional analyses (this step will also involve creating DFXML and correcting MAC times)
-            current_barcode.disk_image_info()
-            current_barcode.disk_image_replication()
+            self.disk_image_info()
+            self.disk_image_replication()
         
         #DVD job
-        elif current_barcode.job_type == 'DVD':
+        elif self.job_type == 'DVD':
 
-            current_barcode.ddrescue_image()
+            self.ddrescue_image()
             
             #check DVD for title information
-            drive_letter = "{}\\".format(current_barcode.optical_drive_letter())
-            titlecount, title_format = current_barcode.lsdvd_check(drive_letter)
+            drive_letter = "{}\\".format(self.optical_drive_letter())
+            titlecount, title_format = self.lsdvd_check(drive_letter)
             
             #make surre this isn't PAL formatted: need to figure out solution. 
             if title_format == 'PAL':
@@ -2290,16 +2290,16 @@ class ItemBarcode(Shipment):
             
             #if DVD has one or more titles, rip raw streams to .MPG
             if titlecount > 0:
-                current_barcode.normalize_dvd_content(titlecount, drive_letter)
+                self.normalize_dvd_content(titlecount, drive_letter)
             else:
                 print('\nWARNING: DVD does not appear to have any titles; job type should likely be Disk_image.  Manually review disc and re-transfer content if necessary.')
                 return
         
         #CDDA job
-        elif current_barcode.job_type == 'CDDA':
+        elif self.job_type == 'CDDA':
             #create a copy of raw pulse code modulated (PCM) audio data and then rip to WAV using cd-paranoia
-            current_barcode.cdda_image_creation()
-            current_barcode.cdda_wav_creation()
+            self.cdda_image_creation()
+            self.cdda_wav_creation()
 
         print('\n\n--------------------------------------------------------------------------------------------------\n\n')
         
@@ -2616,6 +2616,7 @@ class ManualPremisEvent(tk.Toplevel):
         self.title('BDPL Ingest: Add PREMIS Event')
         self.iconbitmap(r'C:/BDPL/scripts/favicon.ico')
         self.protocol('WM_DELETE_WINDOW', self.close_top)
+        self.attributes('-topmost', 'true')
         
         self.controller = controller
         
@@ -2741,11 +2742,11 @@ class ManualPremisEvent(tk.Toplevel):
             ts = str(datetime.datetime.now())
             
         elif self.timestamp_source.get() == 'folder':
-            self.selected_dir = filedialog.askdirectory(parent=self, initialdir=self.controller.bdpl_home_dir, title='Select a folder to extract timestamp from')
+            self.selected_dir = filedialog.askdirectory(parent=self, initialdir=self.controller.bdpl_work_dir, title='Select a folder to extract timestamp from')
             ts = datetime.datetime.fromtimestamp(os.path.getmtime(self.selected_dir)).isoformat()
             
         elif self.timestamp_source.get() == 'file':
-            selected_file = filedialog.askopenfilename(parent=self, initialdir=self.controller.bdpl_home_dir, title='Select a file to extract timestamp from')
+            selected_file = filedialog.askopenfilename(parent=self, initialdir=self.controller.bdpl_work_dir, title='Select a file to extract timestamp from')
             ts = datetime.datetime.fromtimestamp(os.path.getmtime(file_)).isoformat()
         
         self.timestamp = ts
@@ -3057,4 +3058,6 @@ class RipstationBatch(Shipment):
         
         pass
         
-        
+class SdaBatchDeposit(Shipment):
+    def __init__(self, controller):
+        Shipment.__init__(self, controller)

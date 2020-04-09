@@ -51,7 +51,12 @@ class BdplMainApp(tk.Tk):
         self.bdpl_archiver_dir = bdpl_archiver_dir
         self.bdpl_resources = os.path.join(bdpl_work_dir, 'bdpl_resources')
         self.addresses = 'C:/BDPL/resources/addresses.txt'
+        with open(self.addresses, 'r') as f:
+            self.ip_addresses = f.read().splitlines()
+        
         self.bdpl_master_spreadsheet = os.path.join(self.bdpl_archiver_dir, 'spreadsheets', 'bdpl_master_spreadsheet.xlsx')
+        
+        self.checked_servers = {'bdpl_workspace' : False, 'bdpl_archiver' : False}
         
         #variables entered into BDPL interface
         self.job_type = tk.StringVar()
@@ -132,6 +137,14 @@ class BdplMainApp(tk.Tk):
         tab = event.widget.nametowidget(event.widget.select())
         event.widget.configure(height=tab.winfo_reqheight())
         
+        if self.bdpl_notebook.tab(self.bdpl_notebook.select(), 'text') in ['BDPL Ingest',  'RipStation Ingest']:
+            if not self.checked_servers['bdpl_workspace']:
+                self.check_connection("bdpl_workspace")
+                    
+        elif self.bdpl_notebook.tab(self.bdpl_notebook.select(), 'text') in ['Deposit to SDA']:
+            if not self.checked_servers['bdpl_archiver']:
+                self.check_connection("bdpl_archiver")
+        
     def check_main_vars(self):
         if self.unit_name.get() == '':
             return (False, '\n\nERROR: please make sure you have entered a unit ID abbreviation.')
@@ -141,16 +154,12 @@ class BdplMainApp(tk.Tk):
         
         #check barcode value, too, if we're using standard BDPL Ingest tab
         if self.get_current_tab() == 'BDPL Ingest':
-            if not os.path.exists(self.bdpl_work_dir):
-                self.connect_to_server("bdpl_workspace")
             
             if self.item_barcode.get() == '':
                 return (False, '\n\nERROR: please make sure you have entered a barcode value.')
                 
         #if RipStation job, make sure essential info/files are identified
         elif self.get_current_tab() == 'RipStation Ingest':
-            if not os.path.exists(self.bdpl_work_dir):
-                self.connect_to_server("bdpl_workspace")
             
             if not os.path.exists(self.ripstation_log.get()):
                 return (False, '\n\nERROR: select RipStation log file before continuing')
@@ -160,14 +169,44 @@ class BdplMainApp(tk.Tk):
                 
             if not self.ripstation_ingest_option.get() in ['CDs', 'DVD_Data']:
                 return (False, '\n\nERROR: select RipStation job option before continuing.')
-        
-        elif self.get_current_tab() == 'Deposit to SDA':
-            if not os.path.exists(self.bdpl_archiver_dir):
-                self.connect_to_server("bdpl_archiver")
                 
         #if we get through the above, then we are good to go!
         return (True, 'Unit name and shipment date included.')
+    
+    def check_connection(self, servername):
         
+        if servername == 'bdpl_workspace':
+            ip_address = self.ip_addresses[0]
+            right_drive = self.bdpl_work_dir
+            
+        elif servername == 'bdpl_archiver':
+            ip_address = self.ip_addresses[1]
+            right_drive = self.bdpl_archiver_dir
+        
+        cmd = 'net use'        
+        p = subprocess.run(cmd, shell=True, text=True, capture_output=True)        
+        drive_list = p.stdout.splitlines()
+        
+        found = False
+        mapped_drive = ''
+        
+        for line in drive_list:
+            if not line.startswith('OK'):
+                continue
+            if ip_address == line.split()[2]:
+                mapped_drive = line.split()[1]
+                found = True
+                break
+            
+        if not found: 
+            messagebox.showwarning(title='WARNING', message='{} is not mapped to this workstation.\n\nConnect to server via BDPL Ingest Tool window.'.format(ip_address), master=self)
+            self.connect_to_server(servername)
+        elif found and mapped_drive != right_drive[0:2]:
+            messagebox.showwarning(title='WARNING', message='{} is currently mapped to {} (should be {}).\n\nDisconnect and then reconnect using the BDPL Ingest Tool.'.format(ip_address, mapped_drive, right_drive), master=self)
+        else:
+            self.checked_servers[servername] = found
+        
+    
     def shipment_status(self):
         current_spreadsheet = Spreadsheet(self)
         current_spreadsheet.check_shipment_progress()
@@ -235,7 +274,7 @@ class BdplMainApp(tk.Tk):
         if self.get_current_tab() == 'RipStation Ingest':
             self.unit_name.set('')
             self.shipment_date.set('')
-        
+    
     def connect_to_server(self, servername):
         connect_dialogue = ServerConnect(self, servername)
          
@@ -260,6 +299,7 @@ class ServerConnect(tk.Toplevel):
         self.title('BDPL Ingest: Connect to Server')
         self.iconbitmap(r'C:/BDPL/scripts/favicon.ico')
         self.protocol('WM_DELETE_WINDOW', self.close_top)
+        self.attributes('-topmost', 'true')
         
         self.servername = servername
         self.server = tk.StringVar()
@@ -268,15 +308,12 @@ class ServerConnect(tk.Toplevel):
         self.password = tk.StringVar()
         
         self.controller = controller
-        
-        with open(self.controller.addresses, 'r') as f:
-            servers = f.read().splitlines()
             
         if self.servername == 'bdpl_workspace':
-            self.server.set(servers[0])
+            self.server.set(self.controller.ip_addresses[0])
             self.drive_letter.set('Z:')
         elif self.servername == 'bdpl_archiver':
-            self.server.set(servers[1])
+            self.server.set(self.controller.ip_addresses[1])
             self.drive_letter.set('W:')
             
         '''
@@ -301,6 +338,8 @@ class ServerConnect(tk.Toplevel):
         '''
         entry_fields = [('Username:', self.username), ('Password:', self.password)]
         
+        self.entries={}
+        
         c = 0
         for label_, var in entry_fields:
             l = tk.Label(self.tab_frames_dict['login_frame'], text=label_, anchor='e', justify=tk.RIGHT, width=10)
@@ -309,7 +348,14 @@ class ServerConnect(tk.Toplevel):
             if label_ == 'Password:':
                 e.config(show='*')
             e.grid(row = c, column=1, padx=(0,10), pady=10)
+            self.entries[label_] = e
             c+=1
+        
+        self.display_pw = tk.BooleanVar()
+        self.display_pw.set(False)
+        
+        display = ttk.Checkbutton(self.tab_frames_dict['login_frame'], text='Show password?', variable=self.display_pw, command=self.display_text)
+        display.grid(row = 1, column=2, padx=10, pady=10)
         
         '''
         BUTTONS
@@ -317,54 +363,36 @@ class ServerConnect(tk.Toplevel):
         button_id = {}
         buttons = ['Connect', 'Cancel']
 
+        c=1
         for b in buttons:
             button = tk.Button(self.tab_frames_dict['button_frame'], text=b, bg='light slate gray', width = 10)
-            button.pack(side=tk.LEFT, padx=25, pady=10)
+            button.grid(row=0, column=c, padx=25, pady=10)
             button_id[b] = button
+            c+=1
+        
+        self.tab_frames_dict['button_frame'].grid_columnconfigure(0, weight=1)
+        self.tab_frames_dict['button_frame'].grid_columnconfigure(3, weight=1)
         
         button_id['Connect'].config(command=self.login)
         button_id['Cancel'].config(command=self.close_top)
     
-    def login(self):
-        
-        status, mapped_drive = self.check_connection()
-        if status:
-            if mapped_drive == self.drive_letter.get():
-                messagebox.showinfo(title='Already connected', message='{} already mapped to drive {}'.format(self.server.get(), self.drive_letter.get()))
-                return
-            else:
-                messagebox.showwarning(title='WARNING', message='{} is currently mapped to {} drive.\n\nDisconnect and then rerun procedure to map to {} drive.'.format(self.server.get(), mapped_drive, self.drive_letter.get()))      
+    def display_text(self):
+        if self.display_pw.get():
+            self.entries['Password:'].config(show='')
+        else:
+            self.entries['Password:'].config(show='*')
+            
+    def login(self):     
         
         cmd = 'NET USE {} {} /user:ads\{} "{}"'.format(self.drive_letter.get(), self.server.get(), self.username.get(), self.password.get())
         
         p = subprocess.run(cmd, shell=True, text=True, capture_output=True)
         
-        print(p.returncode)
-        
         if p.returncode == 0:
-            messagebox.showinfo(title='SUCCESS', message='Successfully mapped {} to drive {}'.format(self.server.get(), self.drive_letter.get()))
+            messagebox.showinfo(title='SUCCESS', message='Successfully mapped {} to drive {}'.format(self.server.get(), self.drive_letter.get()), master=self)
+            self.close_top()
         else:
-            messagebox.showerror(title='ERROR', message='Failed to connect to {}:\n\n{}'.format(self.server.get(), p.stderr))            
-    
-    def check_connection(self):
-        
-        cmd = 'net use'
-        
-        p = subprocess.run(cmd, shell=True, text=True, capture_output=True)
-        drive_list = p.stdout.splitlines()
-        
-        found = False
-        mapped_drive = ''
-        
-        for line in drive_list:
-            if not line.startswith('OK'):
-                continue
-            if self.server.get() == line.split()[2]:
-                mapped_drive = line.split()[1]
-                found = True
-                break
-        
-        return (found, mapped_drive)
+            messagebox.showerror(title='ERROR', message='Failed to connect to {}:\n\n{}'.format(self.server.get(), p.stderr), master=self)            
     
     def close_top(self):
         #close window
@@ -696,11 +724,15 @@ class RipstationIngest(tk.Frame):
         button_id = {}
         buttons = ['New', 'Launch Batch', 'Quit']
 
+        c = 1
         for b in buttons:
             button = tk.Button(self.tab_frames_dict['button_frame'], text=b, bg='light slate gray', width = 15)
-            button.pack(side=tk.LEFT, padx=20, pady=10)
-
+            button.grid(row=0, column=c, padx=20, pady=10)
+            c+=1
             button_id[b] = button
+            
+        self.tab_frames_dict['button_frame'].grid_columnconfigure(0, weight=1)
+        self.tab_frames_dict['button_frame'].grid_columnconfigure(4, weight=1)
 
         #now use button instances to assign commands
         button_id['New'].config(command = self.controller.clear_gui)
@@ -776,8 +808,7 @@ class SdaDeposit(tk.Frame):
         '''
         BATCH INFORMATION FRAME: includes entry fields to capture unit and shipment date
         '''
-        entry_fields = [('Unit:', self.controller.unit_name), ('Shipment date:', self.controller.shipment_date)]
-
+        
         ttk.Label(self.tab_frames_dict['batch_info_frame'], text='Unit:').pack(padx=(20,0), pady=10, side=tk.LEFT)
         e = ttk.Entry(self.tab_frames_dict['batch_info_frame'], width=5, textvariable=self.controller.unit_name)
         e.pack(padx=10, pady=10, side=tk.LEFT)
@@ -788,23 +819,24 @@ class SdaDeposit(tk.Frame):
         
         '''
         SEPARATIONS FRAME
-        '''
-        self.controller.separations_status.set(False)
-        self.separations_chkbx = tk.Checkbutton(self.tab_frames_dict['separations_frame'], text='Content will be separated from shipment?', variable=self.controller.separations_status, command = self.separations_check, anchor='w', justify=tk.LEFT)
-        self.separations_chkbx.grid(row=0, column=0, columnspan=2, padx=10, pady=10)
-        
+        '''        
         self.separations_file = ttk.Entry(self.tab_frames_dict['separations_frame'], width=80, )
-        self.separations_file.grid(row=1, column=0, padx=10, pady=10)
+        self.separations_file.grid(row=0, column=0, padx=10, pady=10)
         self.separations_file['state'] = 'disabled'
 
-        tk.Button(self.tab_frames_dict['separations_frame'], text='Add file', bg='light slate gray', command=self.separations_browse).grid(row=1, column=1, padx=10, pady=10)
+        tk.Button(self.tab_frames_dict['separations_frame'], text='Add file', bg='light slate gray', command=self.separations_browse).grid(row=0, column=1, padx=10, pady=10)
+        
+        self.controller.separations_status.set(False)
+        self.separations_chkbx = tk.Checkbutton(self.tab_frames_dict['separations_frame'], text='Shipment includes separations?', variable=self.controller.separations_status, command = self.separations_check, anchor='w', justify=tk.LEFT)
+        self.separations_chkbx.grid(row=1, column=0, columnspan=2, padx=10, pady=(0,10))
         
         '''
         BUTTON FRAME
         '''
         
-        tk.Button(self.tab_frames_dict['button_frame'], text='Launch Deposit', width=15, bg='light slate gray', command=self.launch_sda_deposit).grid(row=0, column=1, padx=10, pady=10)
-        tk.Button(self.tab_frames_dict['button_frame'], text='Quit', width=15, bg='light slate gray', command = lambda: close_app(self.controller)).grid(row=0, column=2, padx=10, pady=10)
+        tk.Button(self.tab_frames_dict['button_frame'], text='Launch Deposit', width=15, bg='light slate gray', command=self.launch_sda_deposit).grid(row=0, column=1, padx=30, pady=10)
+        tk.Button(self.tab_frames_dict['button_frame'], text='Quit', width=15, bg='light slate gray', command = lambda: close_app(self.controller)).grid(row=0, column=2, padx=30, pady=10)
+        
         self.tab_frames_dict['button_frame'].grid_columnconfigure(0, weight=1)
         self.tab_frames_dict['button_frame'].grid_columnconfigure(3, weight=1)
         
