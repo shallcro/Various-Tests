@@ -40,7 +40,7 @@ from BdplObjects import Unit, Shipment, ItemBarcode, Spreadsheet, ManualPremisEv
 
 #set up as controller
 class BdplMainApp(tk.Tk):
-    def __init__(self, bdpl_work_dir, bdpl_archiver_dir):
+    def __init__(self, bdpl_work_dir, bdpl_archiver_drive):
         tk.Tk.__init__(self)
         self.geometry("+0+0")
         self.title("Indiana University Library Born-Digital Preservation Lab")
@@ -48,13 +48,13 @@ class BdplMainApp(tk.Tk):
         self.protocol('WM_DELETE_WINDOW', lambda: close_app(self))
 
         self.bdpl_work_dir = bdpl_work_dir
-        self.bdpl_archiver_dir = bdpl_archiver_dir
+        self.bdpl_archiver_drive = bdpl_archiver_drive
         self.bdpl_resources = os.path.join(bdpl_work_dir, 'bdpl_resources')
         self.addresses = 'C:/BDPL/resources/addresses.txt'
         with open(self.addresses, 'r') as f:
             self.ip_addresses = f.read().splitlines()
         
-        self.bdpl_master_spreadsheet = os.path.join(self.bdpl_archiver_dir, 'spreadsheets', 'bdpl_master_spreadsheet.xlsx')
+        self.bdpl_master_spreadsheet = os.path.join(self.bdpl_archiver_drive, 'spreadsheets', 'bdpl_master_spreadsheet.xlsx')
         
         self.checked_servers = {'bdpl_workspace' : False, 'bdpl_archiver' : False}
         
@@ -181,7 +181,7 @@ class BdplMainApp(tk.Tk):
             
         elif servername == 'bdpl_archiver':
             ip_address = self.ip_addresses[1]
-            right_drive = self.bdpl_archiver_dir
+            right_drive = self.bdpl_archiver_drive
         
         cmd = 'net use'        
         p = subprocess.run(cmd, shell=True, text=True, capture_output=True)        
@@ -225,13 +225,25 @@ class BdplMainApp(tk.Tk):
         #create a manual PREMIS object
         new_premis_event = ManualPremisEvent(self)   
         
+    def create_frames(self, array, parent):
+    
+        temp_frames_dict = {}
+        
+        for name_, label_ in array:
+            f = tk.LabelFrame(parent, text = label_)
+            f.pack(fill=tk.BOTH, expand=True, pady=5)
+            temp_frames_dict[name_] = f
+        
+        return temp_frames_dict
+        
+    
     def update_combobox(self, combobox):
         if self.unit_name.get() == '':
             combobox_list = []
         else:
             unit_home = os.path.join(self.bdpl_work_dir, self.unit_name.get(), 'ingest')
             combobox_list = glob.glob1(unit_home, '*')
-
+        
         combobox['values'] = combobox_list
         
     def clear_gui(self):        
@@ -321,12 +333,14 @@ class ServerConnect(tk.Toplevel):
         '''
         tab_frames_list = [('message_frame', ''), ('login_frame', 'Login Information:'), ('button_frame', 'Actions:')]
 
-        self.tab_frames_dict = {}
+        # self.tab_frames_dict = {}
 
-        for name_, label_ in tab_frames_list:
-            f = tk.LabelFrame(self, text = label_)
-            f.pack(fill=tk.BOTH, expand=True, pady=5)
-            self.tab_frames_dict[name_] = f
+        # for name_, label_ in tab_frames_list:
+            # f = tk.LabelFrame(self, text = label_)
+            # f.pack(fill=tk.BOTH, expand=True, pady=5)
+            # self.tab_frames_dict[name_] = f
+            
+        self.tab_frames_dict = self.controller.create_frames(tab_frames_list, self)
         
         '''
         MESSAGE
@@ -420,7 +434,8 @@ class BdplIngest(tk.Frame):
             f = tk.LabelFrame(self, text = label_)
             f.pack(fill=tk.BOTH, expand=True, pady=5)
             self.tab_frames_dict[name_] = f
-
+        
+        
         '''
         BATCH INFORMATION FRAME: includes entry fields to capture barcode, unit, and shipment date
         '''
@@ -791,7 +806,9 @@ class SdaDeposit(tk.Frame):
 
         self.parent = parent
         self.controller = controller
-        self.bdpl_archiver_dir = self.controller.bdpl_archiver_dir
+        self.bdpl_archiver_drive = self.controller.bdpl_archiver_drive
+        
+        self.archiver_dir = tk.StringVar()
         
         '''
         CREATE FRAMES
@@ -816,6 +833,18 @@ class SdaDeposit(tk.Frame):
         ttk.Label(self.tab_frames_dict['batch_info_frame'], text='Shipment date:').pack(padx=(20,0), pady=10, side=tk.LEFT)
         self.date_combobox = ttk.Combobox(self.tab_frames_dict['batch_info_frame'], width=20, textvariable=self.controller.shipment_date, postcommand = lambda: self.controller.update_combobox(self.date_combobox))
         self.date_combobox.pack(padx=10, pady=10, side=tk.LEFT)
+        
+        #add option to select Archiver destination
+        ttk.Label(self.tab_frames_dict['batch_info_frame'], text='Archiver Target:').pack(padx=(20,0), pady=10, side=tk.LEFT)
+        
+        self.archiver_combobox = ttk.Combobox(self.tab_frames_dict['batch_info_frame'], width=25, textvariable=self.archiver_dir, state='readonly')
+        
+        targets = glob.glob1(os.path.join(self.bdpl_archiver_drive, 'Archiver_spool'), '*')
+        
+        self.archiver_combobox['values'] = targets
+        self.archiver_combobox.current(targets.index('general%2fmediaimages'))
+        
+        self.archiver_combobox.pack(padx=10, pady=10, side=tk.LEFT)
         
         '''
         SEPARATIONS FRAME
@@ -1028,10 +1057,10 @@ def main():
 
     #assign path for 'home directory'.  Change if needed...
     bdpl_work_dir = 'Z:\\'
-    bdpl_archiver_dir = 'W:\\'
+    bdpl_archiver_drive = 'W:\\'
 
     #create and launch our main app.
-    bdpl = BdplMainApp(bdpl_work_dir, bdpl_archiver_dir)
+    bdpl = BdplMainApp(bdpl_work_dir, bdpl_archiver_drive)
     bdpl.mainloop()
 
 if __name__ == "__main__":

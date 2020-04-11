@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import bagit
 import chardet
 from collections import OrderedDict
 from collections import Counter
@@ -21,6 +22,7 @@ import shutil
 import sqlite3
 import subprocess
 import sys
+import tarfile
 import time
 import tkinter as tk
 from tkinter import ttk
@@ -2430,26 +2432,28 @@ class ItemBarcode(Shipment):
             print('\n\nReady for next item!') 
  
 class Spreadsheet(Shipment):
-    def __init__(self, controller, master=None):
+    def __init__(self, controller):
         Shipment.__init__(self, controller)
         
         self.controller = controller        
         self.item_barcode = self.controller.item_barcode.get()
-        
-        if master:
-            self.spreadsheet = self.bdpl_master_spreadsheet
+
     
     def open_wb(self, master=None):
         self.wb = openpyxl.load_workbook(self.spreadsheet)
-        
-        if master:
+            
+        try:
             item_ws = self.wb['Item']
             cumulative_ws = self.wb['Cumulative']
-        else:
-            self.wb = openpyxl.load_workbook(self.spreadsheet)
+        except KeyError:
+            pass
+        
+        try:
             self.inv_ws = self.wb['Inventory']
             self.app_ws = self.wb['Appraisal']
             self.info_ws = self.wb['Basic_Transfer_Information']
+        except KeyError:
+            pass
     
     def already_open(self):
         temp_file = os.path.join(os.path.dirname(self.spreadsheet), '~${}'.format(os.path.basename(self.spreadsheet)))
@@ -2478,76 +2482,77 @@ class Spreadsheet(Shipment):
 
         spreadsheet_columns = {}
         
-        for cell in ws[1]:
-            if not cell.value is None:
-                if 'identifier' in str(cell.value).lower():
-                    spreadsheet_columns['item_barcode'] = cell.column
-                elif 'accession' in cell.value.lower():
-                    spreadsheet_columns['accession_number'] = cell.column
-                elif 'collection title' in cell.value.lower():
-                    spreadsheet_columns['collection_title'] = cell.column
-                elif 'collection id' in cell.value.lower():
-                    spreadsheet_columns['collection_id'] = cell.column
-                elif 'creator' in cell.value.lower():
-                    spreadsheet_columns['collection_creator'] = cell.column
-                elif 'physical location' in cell.value.lower():
-                    spreadsheet_columns['phys_loc'] = cell.column
-                elif 'source type' in cell.value.lower():
-                    spreadsheet_columns['content_source_type'] = cell.column
-                elif cell.value.strip().lower() == 'title':
-                    spreadsheet_columns['item_title'] = cell.column
-                elif 'label transcription' in cell.value.lower():
-                    spreadsheet_columns['label_transcription'] = cell.column
-                elif cell.value.strip().lower() == 'description':
-                    spreadsheet_columns['item_description'] = cell.column
-                elif 'initial appraisal notes' in cell.value.lower():
-                    spreadsheet_columns['appraisal_notes'] = cell.column
-                elif 'content date range' in cell.value.lower():
-                    spreadsheet_columns['assigned_dates'] = cell.column
-                elif 'instructions' in cell.value.lower():
-                    spreadsheet_columns['bdpl_instructions'] = cell.column
-                elif 'restriction statement' in cell.value.lower():
-                    spreadsheet_columns['restriction_statement'] = cell.column
-                elif 'restriction end date' in cell.value.lower():
-                    spreadsheet_columns['restriction_end_date'] = cell.column
-                elif 'move directly to sda' in cell.value.lower():
-                    spreadsheet_columns['initial_appraisal'] = cell.column
-                elif 'transfer method' in cell.value.lower():
-                    spreadsheet_columns['transfer_method'] = cell.column
-                elif 'migration date' in cell.value.lower():
-                    spreadsheet_columns['migration_date'] = cell.column
-                elif 'migration notes' in cell.value.lower():
-                    spreadsheet_columns['technician_note'] = cell.column
-                elif 'migration outcome' in cell.value.lower():
-                    spreadsheet_columns['migration_outcome'] = cell.column
-                elif 'extent (normalized)' in cell.value.lower():
-                    spreadsheet_columns['extent_normal'] = cell.column
-                elif 'extent (raw)' in cell.value.lower():
-                    spreadsheet_columns['extent_raw'] = cell.column
-                elif 'no. of files' in cell.value.lower():
-                    spreadsheet_columns['item_file_count'] = cell.column
-                elif 'no. of duplicate files' in cell.value.lower():
-                    spreadsheet_columns['item_duplicate_count'] = cell.column
-                elif 'no. of unidentified files' in cell.value.lower():
-                    spreadsheet_columns['item_unidentified_count'] = cell.column
-                elif 'file formats' in cell.value.lower():
-                    spreadsheet_columns['format_overview'] = cell.column
-                elif 'begin date' in cell.value.lower():
-                    spreadsheet_columns['begin_date'] = cell.column
-                elif 'end date' in cell.value.lower():
-                    spreadsheet_columns['end_date'] = cell.column
-                elif 'virus status' in cell.value.lower():
-                    spreadsheet_columns['virus_scan_results'] = cell.column
-                elif 'pii status' in cell.value.lower():
-                    spreadsheet_columns['pii_scan_results'] = cell.column
-                elif 'full report' in cell.value.lower():
-                    spreadsheet_columns['full_report'] = cell.column
-                elif 'link to transfer' in cell.value.lower():
-                    spreadsheet_columns['transfer_link'] = cell.column
-                elif 'appraisal results' in cell.value.lower():
-                    spreadsheet_columns['final_appraisal'] = cell.column
-                elif 'job type' in cell.value.lower():
-                    spreadsheet_columns['job_type'] = cell.column
+        if ws.title in ['Inventory', 'Appraisal']:
+            for cell in ws[1]:
+                if not cell.value is None:
+                    if 'identifier' in str(cell.value).lower():
+                        spreadsheet_columns['item_barcode'] = cell.column
+                    elif 'accession' in cell.value.lower():
+                        spreadsheet_columns['accession_number'] = cell.column
+                    elif 'collection title' in cell.value.lower():
+                        spreadsheet_columns['collection_title'] = cell.column
+                    elif 'collection id' in cell.value.lower():
+                        spreadsheet_columns['collection_id'] = cell.column
+                    elif 'creator' in cell.value.lower():
+                        spreadsheet_columns['collection_creator'] = cell.column
+                    elif 'physical location' in cell.value.lower():
+                        spreadsheet_columns['phys_loc'] = cell.column
+                    elif 'source type' in cell.value.lower():
+                        spreadsheet_columns['content_source_type'] = cell.column
+                    elif cell.value.strip().lower() == 'title':
+                        spreadsheet_columns['item_title'] = cell.column
+                    elif 'label transcription' in cell.value.lower():
+                        spreadsheet_columns['label_transcription'] = cell.column
+                    elif cell.value.strip().lower() == 'description':
+                        spreadsheet_columns['item_description'] = cell.column
+                    elif 'initial appraisal notes' in cell.value.lower():
+                        spreadsheet_columns['appraisal_notes'] = cell.column
+                    elif 'content date range' in cell.value.lower():
+                        spreadsheet_columns['assigned_dates'] = cell.column
+                    elif 'instructions' in cell.value.lower():
+                        spreadsheet_columns['bdpl_instructions'] = cell.column
+                    elif 'restriction statement' in cell.value.lower():
+                        spreadsheet_columns['restriction_statement'] = cell.column
+                    elif 'restriction end date' in cell.value.lower():
+                        spreadsheet_columns['restriction_end_date'] = cell.column
+                    elif 'move directly to sda' in cell.value.lower():
+                        spreadsheet_columns['initial_appraisal'] = cell.column
+                    elif 'transfer method' in cell.value.lower():
+                        spreadsheet_columns['transfer_method'] = cell.column
+                    elif 'migration date' in cell.value.lower():
+                        spreadsheet_columns['migration_date'] = cell.column
+                    elif 'migration notes' in cell.value.lower():
+                        spreadsheet_columns['technician_note'] = cell.column
+                    elif 'migration outcome' in cell.value.lower():
+                        spreadsheet_columns['migration_outcome'] = cell.column
+                    elif 'extent (normalized)' in cell.value.lower():
+                        spreadsheet_columns['extent_normal'] = cell.column
+                    elif 'extent (raw)' in cell.value.lower():
+                        spreadsheet_columns['extent_raw'] = cell.column
+                    elif 'no. of files' in cell.value.lower():
+                        spreadsheet_columns['item_file_count'] = cell.column
+                    elif 'no. of duplicate files' in cell.value.lower():
+                        spreadsheet_columns['item_duplicate_count'] = cell.column
+                    elif 'no. of unidentified files' in cell.value.lower():
+                        spreadsheet_columns['item_unidentified_count'] = cell.column
+                    elif 'file formats' in cell.value.lower():
+                        spreadsheet_columns['format_overview'] = cell.column
+                    elif 'begin date' in cell.value.lower():
+                        spreadsheet_columns['begin_date'] = cell.column
+                    elif 'end date' in cell.value.lower():
+                        spreadsheet_columns['end_date'] = cell.column
+                    elif 'virus status' in cell.value.lower():
+                        spreadsheet_columns['virus_scan_results'] = cell.column
+                    elif 'pii status' in cell.value.lower():
+                        spreadsheet_columns['pii_scan_results'] = cell.column
+                    elif 'full report' in cell.value.lower():
+                        spreadsheet_columns['full_report'] = cell.column
+                    elif 'link to transfer' in cell.value.lower():
+                        spreadsheet_columns['transfer_link'] = cell.column
+                    elif 'appraisal results' in cell.value.lower():
+                        spreadsheet_columns['final_appraisal'] = cell.column
+                    elif 'job type' in cell.value.lower():
+                        spreadsheet_columns['job_type'] = cell.column
         
         return spreadsheet_columns
         
@@ -2609,6 +2614,19 @@ class Spreadsheet(Shipment):
             print('\n\nThe following barcodes require ingest:\n{}'.format('\n'.join(items_not_done)))
         
         print('\n\nCurrent status: {} out of {} items have been ingested. \n\n{} remain.'.format(len(app_barcodes), len(inv_list), current_total))
+        
+class MasterSpreadsheet(Spreadsheet):
+    def __init__(self, controller):
+        Spreadsheet.__init__(self, controller)
+        self.controller = controller        
+        
+        self.spreadsheet = self.controller.bdpl_master_spreadsheet
+    
+    def verify_master_spreadsheet(self):
+        if not os.path.exists(self.spreadsheet):
+            return (False, 'Unable to locate {}. Consult with digital preservation librarian.'.format(self.spreadsheet))
+        else:
+            return (True, "Let's roll!")
         
 class ManualPremisEvent(tk.Toplevel):
     def __init__(self, controller):
@@ -3061,3 +3079,27 @@ class RipstationBatch(Shipment):
 class SdaBatchDeposit(Shipment):
     def __init__(self, controller):
         Shipment.__init__(self, controller)
+        self.controller = controller
+        self.master_spreadsheet = MasterSpreadsheet(self.controller)
+  
+        self.bdpl_archiver_target = os.path.join(self.controller.archiver_drive, 'Archiver_spool', self.controller.tabs['SdaDeposit'].archiver_dir.get())
+        
+        self.bag_report_dir = os.path.join(self.ship_dir, 'bag_reports')
+        self.deposit_packaging_info = os.path.join(bag_report_dir, 'packaging-info.txt')
+        
+    def prep_batch(self):
+        #make sure ey variables are present
+        status, msg = self.controller.check_main_vars()
+            if not status:
+                return (status, msg)
+        
+        #verify master spreadsheet
+        master_spreadsheet =
+        status, msg = MasterSpreadsheet(self.controller).verify_master_spreadsheet()
+            if not status:
+                return (status, msg)
+        
+        #verify shipment spreadsheet
+        if not os.path.exists(self.bag_report_dir):
+            os.mkdir(self.bag_report_dir)
+        
