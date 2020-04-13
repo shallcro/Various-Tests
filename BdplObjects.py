@@ -2439,21 +2439,17 @@ class Spreadsheet(Shipment):
         self.item_barcode = self.controller.item_barcode.get()
 
     
-    def open_wb(self, master=None):
+    def open_wb(self):
         self.wb = openpyxl.load_workbook(self.spreadsheet)
             
-        try:
+        if self.__class__.__name__ == 'MasterSpreadsheet':
             item_ws = self.wb['Item']
             cumulative_ws = self.wb['Cumulative']
-        except KeyError:
-            pass
-        
-        try:
+            
+        elif self.__class__.__name__ == 'Spreadsheet':
             self.inv_ws = self.wb['Inventory']
             self.app_ws = self.wb['Appraisal']
             self.info_ws = self.wb['Basic_Transfer_Information']
-        except KeyError:
-            pass
     
     def already_open(self):
         temp_file = os.path.join(os.path.dirname(self.spreadsheet), '~${}'.format(os.path.basename(self.spreadsheet)))
@@ -2730,7 +2726,7 @@ class ManualPremisEvent(tk.Toplevel):
             self.controller.item_barcode.set(self.barcode_entry.get().trim())
         
         current_spreadsheet = Spreadsheet(self.controller)
-        current_spreadsheet.open_wb('shipment')
+        current_spreadsheet.open_wb()
         
         if not current_spreadsheet.return_row(current_spreadsheet.inv_ws)[0]:
             print('\n\nWARNING: Barcode value does not appear in spreadsheet')
@@ -3084,22 +3080,235 @@ class SdaBatchDeposit(Shipment):
   
         self.bdpl_archiver_target = os.path.join(self.controller.archiver_drive, 'Archiver_spool', self.controller.tabs['SdaDeposit'].archiver_dir.get())
         
+        #directories
         self.bag_report_dir = os.path.join(self.ship_dir, 'bag_reports')
-        self.deposit_packaging_info = os.path.join(bag_report_dir, 'packaging-info.txt')
+        #folders/files for tracking status
+        self.deaccession_dir = os.path.join(self.ship_dir, 'deaccessioned')
+        self.unaccounted_dir = os.path.join(self.ship_dir, 'unaccounted') 
         
-    def prep_batch(self):
-        #make sure ey variables are present
+        self.deposit_dirs = [self.bag_report_dir, self.deaccession_dir, self.unaccounted_dir]
+        
+        self.sda_status = os.path.join(self.bag_report_dir, 'sda_status')
+        self.status_db = shelve.open(self.sda_status, writeback=True)
+        
+        #set up shelve to track status
+        if len(self.status_db) == 0:
+ 
+            for ls in [
+                'spreadsheet_barcodes', #list of all barcodes in spreadsheet
+                'directory_barcodes', #list of all barcodes in ship_dir
+                'missing_from_ship_dir', #list of barcodes that are in spreadsheet, but not ship_dir
+                'deaccessioned', #barcodes that will be deaccessioned
+                'unaccounted', #barcodes not listed in spreadsheet
+                'other_action', #barcodes with 'other' final appraisal decisions
+                'started', #barcodes that have started deposit process 
+                'prepped', #barcodes that passed inital preparations
+                'bagged', #barcodes that have been successfully bagged
+                'tarred', #barcodes that have been successfully tarred
+                'moved', #barcodes that have been successfully moved to Archiver dropbox
+                'metadata_written', #barcodes that have metadata  successfully written to master spreadsheet
+                'separations_completed', #'separated' content has been removed from the barcode                
+                'cleaned', #barcodes that have been deleted from shipment directory
+                'format_report', #cumulative stats on formats in the shipment
+                'puid_report', #cumulative stats on PUIDs in shipment               
+            ]:
+                self.status_db[ls] = []
+            
+            for dc in [
+                'failed_list', #record any failures]
+                'duration_stats', #information on how long ingest took
+                'shipment_stats' #general stats on shipment
+            ]:
+                self.status_db[dc] = {}         
+        
+    def prep_sda_batch(self, master_spreadsheet, shipment_spreadsheet):
+        '''
+        Check variables and spreadsheets
+        '''
+        #make sure key variables are present
         status, msg = self.controller.check_main_vars()
             if not status:
                 return (status, msg)
         
         #verify master spreadsheet
-        master_spreadsheet =
-        status, msg = MasterSpreadsheet(self.controller).verify_master_spreadsheet()
+        status, msg = master_spreadsheet.verify_master_spreadsheet()
             if not status:
                 return (status, msg)
+                
+        #make sure master spreadsheet is not open
+        if master_spreadsheet.already_open():
+            return (False, '\n\nWARNING: {} is currently open.  Close file before continuing and/or contact digital preservation librarian if other users are involved.'.format(master_spreadsheet.spreadsheet))
+            
+        #open master_spreadsheet; get worksheets
+        master_spreadsheet.open_wb()
         
         #verify shipment spreadsheet
-        if not os.path.exists(self.bag_report_dir):
-            os.mkdir(self.bag_report_dir)
+        status, msg = shipment_spreadsheet.verify_spreadsheet()
+            if not status:
+                return (status, msg)
+                
+        #make sure shipment spreadsheet is not open
+        if shipment_spreadsheet.already_open():
+            return (False, '\n\nWARNING: {} is currently open.  Close file before continuing and/or contact digital preservation librarian if other users are involved.'.format(shipment_spreadsheet.spreadsheet))
+        
+        #open shipment_spreadsheet; get worksheets
+        shipment_spreadsheet.open_wb()
+        
+        #make deposit folders
+        for dir in self.deposit_dirs:
+            if not os.path.exists(dir):
+                os.mkdir(dir)
+        
+        '''    
+        Determine which barcodes are present and need to be deposited to SDA
+        '''
+        
+        os.chdir(self.ship_dir)
+        
+        #barcodes in ship_dir
+        self.status_db['directory_barcodes'] = [d for d in os.listdir(self.ship_dir) if os.path.isdir(d) and not d in ['review', 'bag_reports', 'unaccounted', 'deaccessioned', 'ripstation_reports', 'reports']] #including legacy directory names; at some point, we will need to simplify this list
+        
+        #barcodes in shipment spreadsheet
+        for barcode in shipment_spreadsheet.app_ws['A'][1:]:
+            if not barcode.value is None and not str(barcode.value) in self.status_db['spreadsheet_barcodes']:
+                self.status_db['spreadsheet_barcodes'].append(str(barcode.value))
+        
+        #see if any barcode folders are missing
+        self.status_db['missing_from_ship_dir'] = list(set(self.status_db['spreadsheet_barcodes']) - set(self.status_db['directory_barcodes']))
+        
+        #don't include completed items or alternative appraisal decisions 
+        for ls in['cleaned', 'deaccessioned', 'other_action']:
+            if len(self.status_db[ls]) > 0:
+                for item in self.status_db[ls]:
+                    try:
+                        self.status_db['directory_barcodes'].remove(item)
+                    except ValueError:
+                        pass
+            
+        #check if there are any folders in the shipment NOT in spreadsheet.  If there are any, move to unaccounted_dir
+        self.status_db['unaccounted'] = list(set(self.status_db['directory_barcodes']) - set(self.status_db['spreadsheet_barcodes']))
+        
+        if len(self.status_db['unaccounted']) > 0:
+            for item in self.status_db['unaccounted']:
+                try:
+                    shutil.move(item, self.unaccounted_dir)
+                    self.status_db['directory_barcodes'].remove(item)
+                except (PermissionError, OSError) as e:
+                    self.status_db['failed_list'][item] = 'Move unaccounted failure: {}'.format(e)
+        
+        #get stats on duration of ingest
+        if len(self.status_db['directory_barcodes']) > 0:
+            latest_date = datetime.datetime.fromtimestamp(os.stat(max(self.status_db['directory_barcodes'], key=os.path.getmtime)).st_ctime).strftime('%Y%m%d')
+            
+            earliest_date = datetime.datetime.fromtimestamp(os.stat(min(self.status_db['directory_barcodes'], key=os.path.getmtime)).st_ctime).strftime('%Y%m%d')
+        
+        if len(self.status_db['duration_stats']) > 0:
+       
+            if earliest_date < self.status_db['duration_stats']['earliest']:
+                self.status_db['duration_stats']['earliest'] = earliest_date
+                
+            if latest_date > self.status_db['duration_stats']['latest']:
+                self.status_db['duration_stats']['latest'] = latest_date
+        
+        else:
+            self.status_db['duration_stats']['earliest'] = earliest_date
+            self.status_db['duration_stats']['latest'] = latest_date  
+        
+        #calculate total duration for ingest; use 1 day as minimum timedelta
+        
+        tdelta = datetime.datetime.strptime(self.status_db['duration_stats']['latest'], '%Y%m%d') - datetime.datetime.strptime(self.status_db['duration_stats']['earliest'], '%Y%m%d')
+        
+        if tdelta < datetime.timedelta(days=1):
+            self.status_db['duration_stats']['duration'] = 1
+        else:
+            self.status_db['duration_stats']['duration'] = int(str(tdelta).split()[0])
+            
+        #save info
+        self.status_db.sync()
+        
+        #get columns for current appraisal spreadsheet
+        self.appraisal_ws_columns = shipment_spreadsheet.get_spreadsheet_columns(shipment_spreadsheet.app_ws)
+        
+        return (True, 'Ready to deposit!')
+    
+    def deposit_barcodes_to_sda(self, master_spreadsheet, shipment_spreadsheet):
+        
+        for item in self.status_db['directory_barcodes']:
+        
+            #set item_barcode variable; create barcode object
+            self.controller.item_barcode.set(item.strip())
+            current_barcode = ItemBarcode(self.controller)
+            
+            print('\nWorking on item: {}'.format(current_barcode.item_barcode))
+            
+            #get row for item_barcode in shipment_spreadsheet
+            status, current_row = shipment_spreadsheet.return_row(shipment_spreadsheet.app_ws)
+            
+            #continue to next item if we've already completed item
+            if current_barcode.item_barcode in self.status_db['cleaned']:
+                print('\n{} completed.'.format(current_barcode.item_barcode))
+                continue
+                
+            #load metadata
+            current_barcode.load_item_metadata(shipment_spreadsheet, current_row)
+            
+            #record status
+            if not current_barcode.item_barcode in self.status_db['started']:
+                self.status_db['started'].append(current_barcode.item_barcode)
+                
+            if current_barcode.metadata_dict['final_appraisal'] == "Delete content":
+                try:
+                    print('\n\tContent will not be transferred to SDA.  Continuing with next item.')
+                    shutil.move(current_barcode.barcode_dir, self.deaccession_dir)
+                    self.status_db['deaccessioned'].append(current_barcode.item_barcode)
+                
+                except (PermissionError, OSError) as e:
+                    self.status_db['failed_list'][current_barcode.item_barcode] =  'deaccession: {}'.format(e)
+                        
+                continue
+                
+            elif current_barcode.metadata_dict['final_appraisal'] == "Transfer to SDA":
+                
+                if not current_barcode.item_barcode in self.status_db['prepped']:
+                    
+                    #check if there are any reported files; double check image_dir
+                    if current_barcode.metadata_dict['item_file_count'] is None or current_barcode.metadata_dict['item_file_count'] == 0:
+                    
+                        if not current_barcode.check_files(current_barcode.files_dir) and not current_barcode.check_files(current_barcode.image_dir):
+                            
+                            print('\n\tItem has no files or disk image!  Moving on...')
+                            
+                            self.status_db['failed_list'][current_barcode.item_barcode] = 'check_folder: NO CONTENT IN BARCODE FOLDER; CHANGE APPRAISAL DECISION?'
+                            
+                            continue
+                    
+                    #get file format info
+                    format_csv = os.path.join(self.reports_dir, 'formatVersions.csv')
+                    if os.path.exists(format_csv):
+                        temp_list = []
+                        with open(format_csv, 'r') as fi:
+                            fi = csv.reader(fi)
+                            #skip header row
+                            next(fi)
+                            #loop through format csv; create a dictionary for each row 
+                            for line in fi:
+                                temp_dict = {}
+                                temp_dict['puid'] = line[1]
+                                temp_dict['format'] = line[0]
+                                temp_dict['version'] = line[2]
+                                temp_dict['count'] = int(line[3])
+                                
+                                #add temp dict to a temp list
+                                temp_list.append(temp_dict)
+                                
+                                #add puids to a master list
+                                self.status_db['puid_report'].append(line[1])
+                        
+                        #add format information to master list
+                        self.status_db['format_report'].append({current_barcode.item_barcode : temp_list})
+                        
+                    self.status_db['prepped'].append(current_barcode.item_barcode)
+                        
+            
+            
         

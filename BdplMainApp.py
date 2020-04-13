@@ -893,12 +893,18 @@ class SdaDeposit(tk.Frame):
         self.separations_file.set(sep_file)
         
     def launch_sda_deposit(self):
-        status, msg = self.controller.check_main_vars()
+
+        current_sda_batch = SdaBatchDeposit(self.controller)
+        master_spreadsheet = MasterSpreadsheet(self.controller)
+        shipment_spreadsheet = Spreadsheet(self.controller)
+        
+        status, msg = current_sda_batch.prep_sda_batch(master_spreadsheet, shipment_spreadsheet)
         if not status:
             print(msg)
             return
             
-        print('Launching!')      
+        current_sda_batch.deposit_barcodes_to_sda(master_spreadsheet, shipment_spreadsheet)
+      
 
 def close_app(window):
     window.destroy()
