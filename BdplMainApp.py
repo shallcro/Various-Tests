@@ -70,7 +70,10 @@ class BdplMainApp(tk.Tk):
         self.re_analyze = tk.BooleanVar()
         self.bdpl_failure_notification = tk.BooleanVar()
         self.media_attached = tk.BooleanVar()
+        
+        #SDA Deposit variables
         self.separations_status = tk.BooleanVar()
+        self.separations_file = tk.StringVar()
 
         #GUI metadata variables
         self.collection_title = tk.StringVar()
@@ -169,6 +172,11 @@ class BdplMainApp(tk.Tk):
                 
             if not self.ripstation_ingest_option.get() in ['CDs', 'DVD_Data']:
                 return (False, '\n\nERROR: select RipStation job option before continuing.')
+        
+        #if SDA Deposit, make sure that we have indicated a separations file, if separations_status is True
+            if self.separations_status.get():
+                if self.separations_file.get() == '':
+                    return(False, '\n\nERROR: shipment has separations, but file with associated information has not been identified.')
                 
         #if we get through the above, then we are good to go!
         return (True, 'Unit name and shipment date included.')
@@ -273,7 +281,6 @@ class BdplMainApp(tk.Tk):
         self.bdpl_failure_notification.set(False)
         self.re_analyze.set(False)
         self.media_attached.set(False)
-        self.separations_status.set(False)
         
         #reset radio buttons
         self.job_type.set(None)
@@ -286,6 +293,8 @@ class BdplMainApp(tk.Tk):
         if self.get_current_tab() == 'RipStation Ingest':
             self.unit_name.set('')
             self.shipment_date.set('')
+            self.separations_file.set('')
+            self.separations_status.set(False)
     
     def connect_to_server(self, servername):
         connect_dialogue = ServerConnect(self, servername)
@@ -849,9 +858,10 @@ class SdaDeposit(tk.Frame):
         '''
         SEPARATIONS FRAME
         '''        
-        self.separations_file = ttk.Entry(self.tab_frames_dict['separations_frame'], width=80, )
-        self.separations_file.grid(row=0, column=0, padx=10, pady=10)
-        self.separations_file['state'] = 'disabled'
+        self.controller.separations_file.set('')
+        self.separations_file_entry = ttk.Entry(self.tab_frames_dict['separations_frame'], width=80, textvariable=self.controller.separations_file)
+        self.separations_file_entry.grid(row=0, column=0, padx=10, pady=10)
+        self.separations_file_entry['state'] = 'disabled'
 
         tk.Button(self.tab_frames_dict['separations_frame'], text='Add file', bg='light slate gray', command=self.separations_browse).grid(row=0, column=1, padx=10, pady=10)
         
@@ -862,18 +872,27 @@ class SdaDeposit(tk.Frame):
         '''
         BUTTON FRAME
         '''
+        button_id = {}
         
-        tk.Button(self.tab_frames_dict['button_frame'], text='Launch Deposit', width=15, bg='light slate gray', command=self.launch_sda_deposit).grid(row=0, column=1, padx=30, pady=10)
-        tk.Button(self.tab_frames_dict['button_frame'], text='Quit', width=15, bg='light slate gray', command = lambda: close_app(self.controller)).grid(row=0, column=2, padx=30, pady=10)
+        c=1
+        for label_ in ['New', 'Launch Deposit', 'Quit']:
+            b = tk.Button(self.tab_frames_dict['button_frame'], text=label_, width=15, bg='light slate gray')
+            b.grid(row=0, column=c, padx=20, pady=10)
+            button_id[label_] = b
+            c+=1
         
         self.tab_frames_dict['button_frame'].grid_columnconfigure(0, weight=1)
-        self.tab_frames_dict['button_frame'].grid_columnconfigure(3, weight=1)
+        self.tab_frames_dict['button_frame'].grid_columnconfigure(4, weight=1)
+        
+        button_id['New'].config(command = self.controller.clear_gui)
+        button_id['Launch Deposit'].config(command=self.launch_sda_deposit)
+        button_id['Quit'].config(command = lambda: close_app(self.controller))
         
     def separations_check(self):
         if self.controller.separations_status.get():
-            self.separations_file['state'] = '!disabled'
+            self.separations_file_entry['state'] = '!disabled'
         else:
-            self.separations_file['state'] = 'disabled'
+            self.separations_file_entry['state'] = 'disabled'
             
     def separations_browse(self):
         status, msg = self.controller.check_main_vars()
@@ -890,7 +909,7 @@ class SdaDeposit(tk.Frame):
         
         sep_file = filedialog.askopenfilename(parent=self, initialdir=target_dir, title='Select separations.txt')
         
-        self.separations_file.set(sep_file)
+        self.controller.separations_file.set(sep_file)
         
     def launch_sda_deposit(self):
 
