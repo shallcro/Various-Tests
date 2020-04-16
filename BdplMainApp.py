@@ -36,7 +36,7 @@ import zipfile
 import Objects
 
 #BDPL files
-from BdplObjects import Unit, Shipment, ItemBarcode, Spreadsheet, ManualPremisEvent, RipstationBatch
+from BdplObjects import Unit, Shipment, ItemBarcode, Spreadsheet, MasterSpreadsheet, ManualPremisEvent, RipstationBatch, SdaBatchDeposit
 
 #set up as controller
 class BdplMainApp(tk.Tk):
@@ -49,6 +49,7 @@ class BdplMainApp(tk.Tk):
 
         self.bdpl_work_dir = bdpl_work_dir
         self.bdpl_archiver_drive = bdpl_archiver_drive
+        self.bdpl_archiver_spool_dir = os.path.join(self.bdpl_archiver_drive, 'Archiver_spool')
         self.bdpl_resources = os.path.join(bdpl_work_dir, 'bdpl_resources')
         self.addresses = 'C:/BDPL/resources/addresses.txt'
         with open(self.addresses, 'r') as f:
@@ -212,7 +213,7 @@ class BdplMainApp(tk.Tk):
         elif found and mapped_drive != right_drive[0:2]:
             messagebox.showwarning(title='WARNING', message='{} is currently mapped to {} (should be {}).\n\nDisconnect and then reconnect using the BDPL Ingest Tool.'.format(ip_address, mapped_drive, right_drive), master=self)
         else:
-            self.checked_servers[servername] = found
+            self.checked_servers[servername] = True
         
     
     def shipment_status(self):
@@ -297,7 +298,7 @@ class BdplMainApp(tk.Tk):
             self.separations_status.set(False)
     
     def connect_to_server(self, servername):
-        connect_dialogue = ServerConnect(self, servername)
+        ServerConnect(self, servername)
          
     def check_list(self, list_name, item_barcode):
         if not os.path.exists(list_name):
@@ -414,6 +415,12 @@ class ServerConnect(tk.Toplevel):
         if p.returncode == 0:
             messagebox.showinfo(title='SUCCESS', message='Successfully mapped {} to drive {}'.format(self.server.get(), self.drive_letter.get()), master=self)
             self.close_top()
+            
+            if self.servername == 'bdpl_archiver':
+                targets = glob.glob1(self.controller.bdpl_archiver_spool_dir, '*')
+                self.controller.tabs['SdaDeposit'].archiver_combobox['values'] = targets
+                self.controller.tabs['SdaDeposit'].archiver_combobox.current(targets.index('general%2fmediaimages'))
+                
         else:
             messagebox.showerror(title='ERROR', message='Failed to connect to {}:\n\n{}'.format(self.server.get(), p.stderr), master=self)            
     
@@ -847,13 +854,12 @@ class SdaDeposit(tk.Frame):
         ttk.Label(self.tab_frames_dict['batch_info_frame'], text='Archiver Target:').pack(padx=(20,0), pady=10, side=tk.LEFT)
         
         self.archiver_combobox = ttk.Combobox(self.tab_frames_dict['batch_info_frame'], width=25, textvariable=self.archiver_dir, state='readonly')
-        
-        targets = glob.glob1(os.path.join(self.bdpl_archiver_drive, 'Archiver_spool'), '*')
-        
-        self.archiver_combobox['values'] = targets
-        self.archiver_combobox.current(targets.index('general%2fmediaimages'))
-        
         self.archiver_combobox.pack(padx=10, pady=10, side=tk.LEFT)
+        
+        if os.path.exists(self.bdpl_archiver_drive):
+            targets = glob.glob1(self.bdpl_archiver_spool_dir, '*')
+            self.archiver_combobox['values'] = targets
+            self.archiver_combobox.current(targets.index('general%2fmediaimages'))
         
         '''
         SEPARATIONS FRAME

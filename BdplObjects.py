@@ -248,12 +248,14 @@ class ItemBarcode(Shipment):
             if len(premis_list) > 0:
                 print('\n\nIngest of item has been initiated; the following procedures have been completed:\n\t{}'.format('\n\t'.join(list(set((i['eventType'] for i in premis_list))))))
                 
-    def load_item_metadata(self, current_spreadsheet, item_row):
+    def load_item_metadata(self, current_spreadsheet):
         
         #if dict is empty, get info from Inventory spreadsheet
         if len(self.metadata_dict) == 0:
             #get info from inventory sheet
             ws_columns = current_spreadsheet.get_spreadsheet_columns(current_spreadsheet.inv_ws)
+            
+            item_row = current_spreadsheet.return_row(current_spreadsheet.inv_ws)[1]
             
             for key in ws_columns.keys():
                 if key == 'item_barcode':
@@ -271,6 +273,12 @@ class ItemBarcode(Shipment):
                     self.metadata_dict['item_barcode'] = self.item_barcode
                 else:
                     self.metadata_dict[key] = current_spreadsheet.app_ws.cell(row=row, column=ws_columns[key]).value
+        
+        #add additional elements required for SDA deposit
+        if not self.metadata_dict.get['unit_name']:
+            self.metadata_dict['unit_name'] = self.unit_name
+        if not self.metadata_dict.get['shipment_date']:
+            self.metadata_dict['unit_name'] = self.shipment_date
         
         #clean up any None values
         for val in self.metadata_dict:
@@ -2478,7 +2486,7 @@ class Spreadsheet(Shipment):
         found = False
         row = self.app_ws.max_row+1
         
-        if ws.title in ['Inventory', 'Appraisal']:
+        if ws.title in ['Inventory', 'Appraisal', 'Item']:
             #if barcode exists in spreadsheet, set variable to that row
             for cell in ws['A']:
                 if (cell.value is not None):
@@ -2492,93 +2500,121 @@ class Spreadsheet(Shipment):
     def get_spreadsheet_columns(self, ws):
 
         spreadsheet_columns = {}
-        
-        if ws.title in ['Inventory', 'Appraisal']:
-            for cell in ws[1]:
-                if not cell.value is None:
-                    if 'identifier' in str(cell.value).lower():
-                        spreadsheet_columns['item_barcode'] = cell.column
-                    elif 'accession' in cell.value.lower():
-                        spreadsheet_columns['accession_number'] = cell.column
-                    elif 'collection title' in cell.value.lower():
-                        spreadsheet_columns['collection_title'] = cell.column
-                    elif 'collection id' in cell.value.lower():
-                        spreadsheet_columns['collection_id'] = cell.column
-                    elif 'creator' in cell.value.lower():
-                        spreadsheet_columns['collection_creator'] = cell.column
-                    elif 'physical location' in cell.value.lower():
-                        spreadsheet_columns['phys_loc'] = cell.column
-                    elif 'source type' in cell.value.lower():
-                        spreadsheet_columns['content_source_type'] = cell.column
-                    elif cell.value.strip().lower() == 'title':
-                        spreadsheet_columns['item_title'] = cell.column
-                    elif 'label transcription' in cell.value.lower():
-                        spreadsheet_columns['label_transcription'] = cell.column
-                    elif cell.value.strip().lower() == 'description':
-                        spreadsheet_columns['item_description'] = cell.column
-                    elif 'initial appraisal notes' in cell.value.lower():
-                        spreadsheet_columns['appraisal_notes'] = cell.column
-                    elif 'content date range' in cell.value.lower():
-                        spreadsheet_columns['assigned_dates'] = cell.column
-                    elif 'instructions' in cell.value.lower():
-                        spreadsheet_columns['bdpl_instructions'] = cell.column
-                    elif 'restriction statement' in cell.value.lower():
-                        spreadsheet_columns['restriction_statement'] = cell.column
-                    elif 'restriction end date' in cell.value.lower():
-                        spreadsheet_columns['restriction_end_date'] = cell.column
-                    elif 'move directly to sda' in cell.value.lower():
-                        spreadsheet_columns['initial_appraisal'] = cell.column
-                    elif 'transfer method' in cell.value.lower():
-                        spreadsheet_columns['transfer_method'] = cell.column
-                    elif 'migration date' in cell.value.lower():
-                        spreadsheet_columns['migration_date'] = cell.column
-                    elif 'migration notes' in cell.value.lower():
-                        spreadsheet_columns['technician_note'] = cell.column
-                    elif 'migration outcome' in cell.value.lower():
-                        spreadsheet_columns['migration_outcome'] = cell.column
-                    elif 'extent (normalized)' in cell.value.lower():
-                        spreadsheet_columns['extent_normal'] = cell.column
-                    elif 'extent (raw)' in cell.value.lower():
-                        spreadsheet_columns['extent_raw'] = cell.column
-                    elif 'no. of files' in cell.value.lower():
-                        spreadsheet_columns['item_file_count'] = cell.column
-                    elif 'no. of duplicate files' in cell.value.lower():
-                        spreadsheet_columns['item_duplicate_count'] = cell.column
-                    elif 'no. of unidentified files' in cell.value.lower():
-                        spreadsheet_columns['item_unidentified_count'] = cell.column
-                    elif 'file formats' in cell.value.lower():
-                        spreadsheet_columns['format_overview'] = cell.column
-                    elif 'begin date' in cell.value.lower():
-                        spreadsheet_columns['begin_date'] = cell.column
-                    elif 'end date' in cell.value.lower():
-                        spreadsheet_columns['end_date'] = cell.column
-                    elif 'virus status' in cell.value.lower():
-                        spreadsheet_columns['virus_scan_results'] = cell.column
-                    elif 'pii status' in cell.value.lower():
-                        spreadsheet_columns['pii_scan_results'] = cell.column
-                    elif 'full report' in cell.value.lower():
-                        spreadsheet_columns['full_report'] = cell.column
-                    elif 'link to transfer' in cell.value.lower():
-                        spreadsheet_columns['transfer_link'] = cell.column
-                    elif 'appraisal results' in cell.value.lower():
-                        spreadsheet_columns['final_appraisal'] = cell.column
-                    elif 'job type' in cell.value.lower():
-                        spreadsheet_columns['job_type'] = cell.column
-        
+
+        for cell in ws[1]:
+            if not cell.value is None:
+                if 'identifier' in str(cell.value).lower():
+                    spreadsheet_columns['item_barcode'] = cell.column
+                elif cell.value.lower().strip() == 'unit':
+                    spreadsheet_columns['unit_name'] = cell.column
+                elif cell.value.lower().strip() == 'shipmentID':
+                    spreadsheet_columns['shipment_date'] = cell.column
+                elif 'accession' in cell.value.lower():
+                    spreadsheet_columns['accession_number'] = cell.column
+                elif 'collection title' in cell.value.lower():
+                    spreadsheet_columns['collection_title'] = cell.column
+                elif 'collection id' in cell.value.lower():
+                    spreadsheet_columns['collection_id'] = cell.column
+                elif 'creator' in cell.value.lower():
+                    spreadsheet_columns['collection_creator'] = cell.column
+                elif 'physical location' in cell.value.lower():
+                    spreadsheet_columns['phys_loc'] = cell.column
+                elif 'source type' in cell.value.lower():
+                    spreadsheet_columns['content_source_type'] = cell.column
+                elif cell.value.strip().lower() == 'title':
+                    spreadsheet_columns['item_title'] = cell.column
+                elif 'label transcription' in cell.value.lower():
+                    spreadsheet_columns['label_transcription'] = cell.column
+                elif cell.value.strip().lower() == 'description':
+                    spreadsheet_columns['item_description'] = cell.column
+                elif 'appraisal notes' in cell.value.lower():
+                    spreadsheet_columns['appraisal_notes'] = cell.column
+                elif 'content date range' in cell.value.lower():
+                    spreadsheet_columns['assigned_dates'] = cell.column
+                elif 'instructions' in cell.value.lower():
+                    spreadsheet_columns['bdpl_instructions'] = cell.column
+                elif 'restriction statement' in cell.value.lower():
+                    spreadsheet_columns['restriction_statement'] = cell.column
+                elif 'restriction end date' in cell.value.lower():
+                    spreadsheet_columns['restriction_end_date'] = cell.column
+                elif 'move directly to sda' in cell.value.lower():
+                    spreadsheet_columns['initial_appraisal'] = cell.column
+                elif 'transfer method' in cell.value.lower():
+                    spreadsheet_columns['transfer_method'] = cell.column
+                elif 'migration date' in cell.value.lower():
+                    spreadsheet_columns['migration_date'] = cell.column
+                elif 'migration notes' in cell.value.lower():
+                    spreadsheet_columns['technician_note'] = cell.column
+                elif 'migration outcome' in cell.value.lower():
+                    spreadsheet_columns['migration_outcome'] = cell.column
+                elif 'extent (normalized)' in cell.value.lower():
+                    spreadsheet_columns['extent_normal'] = cell.column
+                elif 'extent (raw)' or 'extracted files extent' in cell.value.lower():
+                    spreadsheet_columns['extent_raw'] = cell.column
+                elif 'no. of files' or 'extracted files number' in cell.value.lower():
+                    spreadsheet_columns['item_file_count'] = cell.column
+                elif 'no. of duplicate files' in cell.value.lower():
+                    spreadsheet_columns['item_duplicate_count'] = cell.column
+                elif 'no. of unidentified files' in cell.value.lower():
+                    spreadsheet_columns['item_unidentified_count'] = cell.column
+                elif 'file formats' in cell.value.lower():
+                    spreadsheet_columns['format_overview'] = cell.column
+                elif 'begin date' in cell.value.lower():
+                    spreadsheet_columns['begin_date'] = cell.column
+                elif 'end date' in cell.value.lower():
+                    spreadsheet_columns['end_date'] = cell.column
+                elif 'virus status' in cell.value.lower():
+                    spreadsheet_columns['virus_scan_results'] = cell.column
+                elif 'pii status' in cell.value.lower():
+                    spreadsheet_columns['pii_scan_results'] = cell.column
+                elif 'full report' in cell.value.lower():
+                    spreadsheet_columns['full_report'] = cell.column
+                elif 'link to transfer' in cell.value.lower():
+                    spreadsheet_columns['transfer_link'] = cell.column
+                elif 'appraisal results' in cell.value.lower():
+                    spreadsheet_columns['final_appraisal'] = cell.column
+                elif 'job type' in cell.value.lower():
+                    spreadsheet_columns['job_type'] = cell.column
+                    
+                #additional elements for master_spreadsheet 'Item' sheet
+                elif 'sip creation date' in cell.value.lower():
+                    spreadsheet_columns['sip_creation_date'] = cell.column
+                elif 'sip extent' in cell.value.lower():
+                    spreadsheet_columns['sip_extent'] = cell.column
+                elif 'sip md5' in cell.value.lower():
+                    spreadsheet_columns['sip_md5'] = cell.column
+                elif 'sip filename' in cell.value.lower():
+                    spreadsheet_columns['sip_filename'] = cell.column
+                    
+                #additional elements for master_spreadsheet 'Cumulative'
+                elif 'sip count' in cell.value.lower():
+                    spreadsheet_columns['sip_count'] = cell.column
+                elif 'sips extent' in cell.value.lower():
+                    spreadsheet_columns['sips_extent'] = cell.column
+                elif 'ingest start date' in cell.value.lower():
+                    spreadsheet_columns['ingest_start_date'] = cell.column
+                elif 'ingest end date' in cell.value.lower():
+                    spreadsheet_columns['ingest_end_date'] = cell.column
+                elif 'ingest duration' in cell.value.lower():
+                    spreadsheet_columns['ingest_duration'] = cell.column
+
         return spreadsheet_columns
         
-    def write_to_spreadsheet(self, metadata_dict):
+    def write_to_spreadsheet(self, metadata_dict, ws=None):
     
-        status, current_row = self.return_row(self.app_ws)
+        if self.__class__.__name__ == 'Spreadsheet':
+            ws = self.app_ws
         
-        ws_cols = self.get_spreadsheet_columns(self.app_ws)
+        current_row = self.return_row(ws)[1]
+        
+        ws_cols = self.get_spreadsheet_columns(ws)
     
         for key in ws_cols.keys():
             if key in metadata_dict:
-                self.app_ws.cell(row=current_row, column=ws_cols[key], value=metadata_dict[key])
+                self.ws.cell(row=current_row, column=ws_cols[key], value=metadata_dict[key])
 
         #save and close spreadsheet
-        self.wb.save(self.spreadsheet)  
+        self.wb.save(self.spreadsheet) 
         
     def check_shipment_progress(self):
         
@@ -3096,7 +3132,7 @@ class SdaBatchDeposit(Shipment):
         self.separations_status = self.controller.separations_status.get()
         self.separations_file = self.controller.separations_file.get()
         self.master_spreadsheet = MasterSpreadsheet(self.controller)
-        self.bdpl_archiver_target = os.path.join(self.controller.archiver_drive, 'Archiver_spool', self.controller.tabs['SdaDeposit'].archiver_dir.get())
+        self.bdpl_archiver_target = os.path.join(self.controller.bdpl_archiver_spool_dir, self.controller.tabs['SdaDeposit'].archiver_dir.get())
         
         #set up deposit directories
         self.bag_report_dir = os.path.join(self.ship_dir, 'bag_reports')
@@ -3107,9 +3143,8 @@ class SdaBatchDeposit(Shipment):
         #set up shelve to track status
         self.sda_status = os.path.join(self.bag_report_dir, 'sda_status')
         self.status_db = shelve.open(self.sda_status, writeback=True)
-        if len(self.status_db) == 0:
- 
-            for ls in [
+        
+        self.db_lists = [
                 'spreadsheet_barcodes', #list of all barcodes in spreadsheet
                 'directory_barcodes', #list of all barcodes in ship_dir
                 'missing_from_ship_dir', #list of barcodes that are in spreadsheet, but not ship_dir
@@ -3125,17 +3160,22 @@ class SdaBatchDeposit(Shipment):
                 'metadata_written', #barcodes that have metadata  successfully written to master spreadsheet                   
                 'cleaned', #barcodes that have been deleted from shipment directory
                 'puid_report', #cumulative stats on PUIDs in shipment               
-            ]:
-                self.status_db[ls] = []
+            ]
             
-            for dc in [
+        self.db_dicts = [
                 'failed_list', #record any failures]          
                 'duration_stats', #information on how long ingest took
                 'format_report', #cumulative stats on formats in the shipment
-                'sip_stats', #stats about individual SIPs
                 'shipment_stats', #general stats on shipment
                 'separation-stats' #stats on separations
-            ]:
+            ]
+            
+        if len(self.status_db) == 0:
+ 
+            for ls in self.db_lists:
+                self.status_db[ls] = []
+            
+            for dc in self.db_dicts:
                 self.status_db[dc] = {}         
         
     def prep_sda_batch(self, master_spreadsheet, shipment_spreadsheet):
@@ -3144,13 +3184,13 @@ class SdaBatchDeposit(Shipment):
         '''
         #make sure key variables are present
         status, msg = self.controller.check_main_vars()
-            if not status:
-                return (status, msg)
+        if not status:
+            return (status, msg)
         
         #verify master spreadsheet
         status, msg = master_spreadsheet.verify_master_spreadsheet()
-            if not status:
-                return (status, msg)
+        if not status:
+            return (status, msg)
                 
         #make sure master spreadsheet is not open
         if master_spreadsheet.already_open():
@@ -3161,8 +3201,8 @@ class SdaBatchDeposit(Shipment):
         
         #verify shipment spreadsheet
         status, msg = shipment_spreadsheet.verify_spreadsheet()
-            if not status:
-                return (status, msg)
+        if not status:
+            return (status, msg)
                 
         #make sure shipment spreadsheet is not open
         if shipment_spreadsheet.already_open():
@@ -3211,7 +3251,7 @@ class SdaBatchDeposit(Shipment):
                     shutil.move(item, self.unaccounted_dir)
                     self.status_db['directory_barcodes'].remove(item)
                 except (PermissionError, OSError) as e:
-                    self.status_db['failed_list'][item] = 'Move unaccounted failure\t{}'.format(e)
+                    self.write_db('failed_list', item, 'Move unaccounted failure\t{}'.format(e))
         
         #get stats on duration of ingest
         if len(self.status_db['directory_barcodes']) > 0:
@@ -3258,29 +3298,26 @@ class SdaBatchDeposit(Shipment):
             
             print('\nWorking on item: {}'.format(current_barcode.item_barcode))
             
-            #get row for item_barcode in shipment_spreadsheet
-            status, current_row = shipment_spreadsheet.return_row(shipment_spreadsheet.app_ws)
-            
             #continue to next item if we've already completed item
             if current_barcode.item_barcode in self.status_db['cleaned']:
                 print('\n{} completed.'.format(current_barcode.item_barcode))
-                continue
-                
+                continue            
+            
             #load metadata
-            current_barcode.load_item_metadata(shipment_spreadsheet, current_row)
+            current_barcode.load_item_metadata(shipment_spreadsheet)
             
             #record status
             if not current_barcode.item_barcode in self.status_db['started']:
-                self.status_db['started'].append(current_barcode.item_barcode)
+                self.write_db('started', current_barcode.item_barcode)
                 
             if current_barcode.metadata_dict['final_appraisal'] == "Delete content":
                 try:
                     print('\n\tContent will not be transferred to SDA.  Continuing with next item.')
                     shutil.move(current_barcode.barcode_dir, self.deaccession_dir)
-                    self.status_db['deaccessioned'].append(current_barcode.item_barcode)
+                    self.write_db('deaccessioned', current_barcode.item_barcode)
                 
                 except (PermissionError, OSError) as e:
-                    self.status_db['failed_list'][current_barcode.item_barcode] =  'deaccession\t{}'.format(e)
+                    self.write_db('failed_list', current_barcode.item_barcode, 'deaccession\t{}'.format(e))
                         
                 continue
                 
@@ -3296,7 +3333,7 @@ class SdaBatchDeposit(Shipment):
                             
                             print('\n\tItem has no files or disk image!  Moving on...')
                             
-                            self.status_db['failed_list'][current_barcode.item_barcode] = 'check_folder\tNO CONTENT IN BARCODE FOLDER; CHANGE APPRAISAL DECISION?'
+                            self.write_db('failed_list', current_barcode.item_barcode,  'check_folder\tNO CONTENT IN BARCODE FOLDER; CHANGE APPRAISAL DECISION?')
                             
                             continue
                     
@@ -3312,16 +3349,17 @@ class SdaBatchDeposit(Shipment):
                             for line in fi:
                                 puid = line[1]
                                 self.status_db['format_report'][current_barcode.item_barcode][puid] = {'format' : line[0], 'version' : line[2], 'count' : int(line[3])}
+                            self.status_db.sync()
                     
                     #item prepped: record status
-                    self.status_db['prepped'].append(current_barcode.item_barcode)
+                    self.write_db('prepped', current_barcode.item_barcode)
                         
                 '''COMPLETE SEPARATIONS AND REMOVE TEMP & B_E FILES'''
                 if not current_barcode.item_barcode in self.status_db['separations_completed']:
                     print('\n\tSeparating unnecessary files...\n')
                     
                     #remove folders
-                    for dir in [current_barcode.temp_dir, current_barcode.bulkext_dir, current_barcode..assets_target]:
+                    for dir in [current_barcode.temp_dir, current_barcode.bulkext_dir, current_barcode.assets_target]:
                         if os.path.exists(dir):
                             shutil.rmtree(dir)
                     
@@ -3375,17 +3413,17 @@ class SdaBatchDeposit(Shipment):
                             
                             #check to see if we failed to identify any separation targets; if so, fail barcode so we can troublshoot
                             if [f for f in files_to_be_separated if 'FAIL' in f]:
-                                self.status_db['failed_list'][current_barcode.item_barcode] = 'separations\t{}'.format(','.join([f for f in files_to_be_separated if 'FAIL' in f]))
+                                self.write_db('failed_list', current_barcode.item_barcode,  'separations\t{}'.format(','.join([f for f in files_to_be_separated if 'FAIL' in f])))
                                 continue
                             #if no failures, move forward with separations
                             else:                                
                                 #separate items and gather stats
                                 status = self.separate_content(current_barcode, files_to_be_separated, shipment_spreadsheet)
-ue
+                                
                                 if not status:
                                     continue
                                 else:
-                                    self.status_db['separations_completed'].append(current_barcode.item_barcode)
+                                    self.write_db('separations_completed', current_barcode.item_barcode)
                 
                 '''BAG FOLDER'''
                 if not current_barcode.item_barcode in self.status_db['bagged']:
@@ -3406,13 +3444,13 @@ ue
                         print('\tBagging complete.')
                         
                         #record completion
-                        self.status_db['bagged'].append(current_barcode.item_barcode)
+                        self.write_db('bagged', current_barcode.item_barcode)
                     
                     #continue on to next item if failure
                     except (RuntimeError, PermissionError, bagit.BagError, OSError) as e:
                         print("\tUnexpected error: ", e)
                         
-                        self.status_db['failed_list'][current_barcode.item_barcode] = 'bagit\t{}'.format(e)
+                        self.write_db('failed_list', current_barcode.item_barcode, 'bagit\t{}'.format(e))
                         
                         continue
                 
@@ -3440,7 +3478,7 @@ ue
                     if available_space <= 0:
                         print('\n\tWARNING! Insufficient space to create tar archive.\n\t\tAvailable space: %s\n\t\tSize needed for archive: %s' % (free_space, string(dir_size)))
                         
-                        self.status_db['failed_list'][current_barcode.item_barcode] = 'Insufficient space\t need minimum of {} bytes'.format(dir_size)
+                        self.write_db('failed_list', current_barcode.item_barcode, 'Insufficient space\t need minimum of {} bytes'.format(dir_size))
                         
                         continue
                     
@@ -3459,14 +3497,14 @@ ue
                             
                         print('\tTar archive created')
                         
-                        self.status_db['tarred'].append(current_barcode.item_barcode)
+                        self.write_db('tarred', current_barcode.item_barcode)
                         
                         
                     except (RuntimeError, PermissionError, IOError, EnvironmentError) as e:
                         
                         print("\tUnexpected error: ", e)
                         
-                        self.status_db['failed_list'][current_barcode.item_barcode] = 'tar\t{}'.format(e)
+                        self.write_db('failed_list', current_barcode.item_barcode, 'tar\t{}'.format(e))
                         
                         continue
                 
@@ -3475,31 +3513,72 @@ ue
                 
                     print('\n\tMoving tar file to Archiver folder...')
                     
-                    #get some stats on SIP
-                    print('\tCalculating SIP size...')
-                    SIP_size = current_barcode.get_size(current_barcode.tar_file)
+                    #get some stats on SIP and store values in current_barcode.metadata_dict
+                    print('\tGenerating SIP statistics...')
+                    current_barcode.metadata_dict['sip_extent'] = current_barcode.get_size(current_barcode.tar_file)
                     
-                    print('\tCalculating SIP md5 checksum...')
-                    SIP_md5 = current_barcode.md5(current_barcode.tar_file)
+                    current_barcode.metadata_dict['sip_md5'] = current_barcode.md5(current_barcode.tar_file)
                     
-                    #store values just in case we need them...
-                    self.status_db['sip_stats'][current_barcode.item_barcode] = {'size' : SIP_size, 'md5' : SIP_md5}
+                    current_barcode.metadata_dict['sip_filename'] = os.path.basename(current_barcode.tar_file)
+                    
+                    current_barcode.metadata_dict['sip_creation_date'] = datetime.datetime.fromtimestamp(os.path.getmtime(current_barcode.tar_file)).isoformat()
+                    
+                    #save metadata_dict
+                    current_barcode.pickle_dump('metadata_dict', current_barcode.metadata_dict)
                     
                     try:
                         shutil.move(current_barcode.tar_file, self.bdpl_archiver_target)
                         
                         print('\tTar file moved.')
                         
-                        self.status_db['moved'].append(current_barcode.item_barcode)
+                        self.write_db('moved', current_barcode.item_barcode)
                         
                     except (RuntimeError, PermissionError, IOError, EnvironmentError) as e:
                     
                         print("\tUnexpected error: ", e)
                         
-                        self.status_db['failed_list'][current_barcode.item_barcode] = 'move\t{}'.format(e)
+                        self.write_db('failed_list', current_barcode.item_barcode, 'move\t{}'.format(e))
                         
                         continue
-                                    
+                
+                '''WRITE STATS TO MASTER SPREADSHEET'''
+                if not current_barcode.item_barcode in self.status_db['metadata_written']:
+                    
+                    master_spreadsheet.write_to_spreadsheet(current_barcode.metadata_dict, master_spreadsheet.item_ws)
+                    
+                    #set up shipment stats dictionary if not already done so
+                    if not self.status_db['shipment_stats'].get('sip_count'):
+                        self.status_db['shipment_stats']['unit_name'] = current_barcode.unit_name
+                        self.status_db['shipment_stats']['shipment_date'] = current_barcode.shipment_date
+                        self.status_db['shipment_stats']['sip_count'] = 0
+                        self.status_db['shipment_stats']['extent_raw'] = 0
+                        self.status_db['shipment_stats']['item_file_count'] = 0
+                        self.status_db['shipment_stats']['sips_extent'] = 0
+                        self.status_db['shipment_stats']['ingest_start_date'] = self.status_db['duration_stats']['earliest']
+                        self.status_db['shipment_stats']['ingest_end_date'] = self.status_db['duration_stats']['latest']
+                        self.status_db['shipment_stats']['ingest_duration'] = self.status_db['duration_stats']['duration']
+                    
+                    #update statistics & save shelve
+                    self.status_db['shipment_stats']['sip_count'] += 1
+                    self.status_db['shipment_stats']['extent_raw'] += current_barcode.metadata_dict['extent_raw']
+                    self.status_db['shipment_stats']['item_file_count'] += current_barcode.metadata_dict['item_file_count']
+                    self.status_db['shipment_stats']['sips_extent'] += current_barcode.metadata_dict['sip_extent']
+                    
+                    self.status_db.sync()
+                    
+                    #record completion
+                    self.write_db('metadata_written', current_barcode.item_barcode)
+                    
+    def write_db(self, db, item_barcode, message=None):
+    
+        if db in self.db_dicts:
+            self.status_db[db][item_barcode] = message
+        
+        elif db in self.db_lists:
+            self.status_db[db].append(item_barcode)
+            
+        self.status_db.sync()
+        
     def separate_content(self, current_barcode, files_to_be_separated, shipment_spreadsheet):
         
         #create timestamp for premis
@@ -3511,12 +3590,13 @@ ue
         
         #if first time through, set up a separations dict for barcode; also write header to log file
         if not self.status_db['separation-stats'].get(current_barcode.item_barcode):
+            
             self.status_db['separation-stats'][current_barcode.item_barcode] = {'files' : [], 'sep_file_count' : 0, 'sep_size_tally' : 0, 'sep_disk_image_count' : 0, 'separated_puids' : [], 'failed_items' : []}
             
-            outfile.write('{}\t{}\t{}\t{}\n'.format('filename', 'type', 'size', 'last modified date')
+            outfile.write('{}\t{}\t{}\t{}\n'.format('filename', 'type', 'size', 'last modified date'))
         
         #set up variable to help track success of operation
-        success=True
+        success = True
         
         for file in files_to_be_separated:
             
@@ -3579,7 +3659,9 @@ ue
                         pass
                         
                 #write info to our separations log
-                outfile.write('{}\t{}\t{}\t{}\n'.format(file, type, size, last_mod_date)
+                outfile.write('{}\t{}\t{}\t{}\n'.format(file, type, size, last_mod_date))
+                
+                self.status_db.sync()
                 
                         
             except (shutil.Error, OSError, IOError, PermissionError) as e:
@@ -3590,7 +3672,7 @@ ue
         #if any files failed to be moved, fail this item; return and then continue to next barcode
         if not success:
             print('\n\tWARNING: error(s) with separations; moving on to next item...')
-            self.status_db['failed_list'][current_barcode.item_barcode] = 'separations\t{}'.format(' | '.join(self.status_db['separation-stats'][current_barcode.item_barcode]['failed_items']))
+            self.write_db('failed_list', current_barcode.item_barcode, 'separations\t{}'.format(' | '.join(self.status_db['separation-stats'][current_barcode.item_barcode]['failed_items']))
             
             #close log and sync status_db
             outfile.close()
@@ -3623,13 +3705,13 @@ ue
         
         #old spreadsheets may not have calculated an extent in bytes; need to catch those outliers (***Can probably remove at some point***)
         if current_barcode.metadata_dict['extent_raw'] is None:
-            current_barcode.metadata_dict['extent_raw'] = 
-            extracted_size = current_barcode.get_size(current_barcode.files_dir) 
+            current_barcode.metadata_dict['extent_raw'] = current_barcode.get_size(current_barcode.files_dir) 
         else:
             current_barcode.metadata_dict['extent_raw'] -= self.status_db['separation-stats'][current_barcode.item_barcode]['sep_size_tally']
     
         current_barcode.metadata_dict['item_file_count'] -= self.status_db['separation-stats'][current_barcode.item_barcode]['sep_file_count']
         
+        #write info to spreadsheet
         shipment_spreadsheet.write_to_spreadsheet(current_barcode.metadata_dict)
         
         #record premis information
