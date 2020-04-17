@@ -857,7 +857,7 @@ class SdaDeposit(tk.Frame):
         self.archiver_combobox.pack(padx=10, pady=10, side=tk.LEFT)
         
         if os.path.exists(self.bdpl_archiver_drive):
-            targets = glob.glob1(self.bdpl_archiver_spool_dir, '*')
+            targets = glob.glob1(self.controller.bdpl_archiver_spool_dir, '*')
             self.archiver_combobox['values'] = targets
             self.archiver_combobox.current(targets.index('general%2fmediaimages'))
         
