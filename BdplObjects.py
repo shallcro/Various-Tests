@@ -112,15 +112,15 @@ class Shipment(Unit):
         else:
             return (False, '\n\tWARNING: {} only contains the following spreadsheet: {}'.format(self.ship_dir, found[0]))
 
-class ItemBarcode(Shipment):
+class DigitalObject(Shipment):
     def __init__(self, controller):
         Shipment.__init__(self, controller)
         self.controller = controller
-        self.item_barcode = self.controller.item_barcode.get()
+        self.identifier = self.controller.identifier.get()
 
         '''SET UP FOLDERS'''
         #main folders
-        self.barcode_dir = os.path.join(self.ship_dir, self.item_barcode)
+        self.barcode_dir = os.path.join(self.ship_dir, self.identifier)
         self.image_dir = os.path.join(self.barcode_dir, "disk-image")
         self.files_dir = os.path.join(self.barcode_dir, "files")
         self.metadata_dir = os.path.join(self.barcode_dir, "metadata")
@@ -132,22 +132,22 @@ class ItemBarcode(Shipment):
 
         '''SET UP FILES'''
         #assets
-        self.imagefile = os.path.join(self.image_dir, '{}.dd'.format(self.item_barcode))
-        self.paranoia_out = os.path.join(self.files_dir, '{}.wav'.format(self.item_barcode))
-        self.tar_file = os.path.join(self.ship_dir, '{}.tar'.format(self.item_barcode))
+        self.imagefile = os.path.join(self.image_dir, '{}.dd'.format(self.identifier))
+        self.paranoia_out = os.path.join(self.files_dir, '{}.wav'.format(self.identifier))
+        self.tar_file = os.path.join(self.ship_dir, '{}.tar'.format(self.identifier))
 
         #files related to disk imaging with ddrescue and FC5025
-        self.mapfile = os.path.join(self.log_dir, '{}.map'.format(self.item_barcode))
+        self.mapfile = os.path.join(self.log_dir, '{}.map'.format(self.identifier))
         self.fc5025_log = os.path.join(self.log_dir, 'fcimage.log')
 
         #log files
         self.virus_log = os.path.join(self.log_dir, 'viruscheck-log.txt')
         self.bulkext_log = os.path.join(self.log_dir, 'bulkext-log.txt')
-        self.lsdvd_out = os.path.join(self.reports_dir, "{}_lsdvd.xml".format(self.item_barcode))
-        self.paranoia_log = os.path.join(self.log_dir, '{}-cdparanoia.log'.format(self.item_barcode))
+        self.lsdvd_out = os.path.join(self.reports_dir, "{}_lsdvd.xml".format(self.identifier))
+        self.paranoia_log = os.path.join(self.log_dir, '{}-cdparanoia.log'.format(self.identifier))
 
         #reports
-        self.disk_info_report = os.path.join(self.reports_dir, '{}-cdrdao-diskinfo.txt'.format(self.item_barcode))
+        self.disk_info_report = os.path.join(self.reports_dir, '{}-cdrdao-diskinfo.txt'.format(self.identifier))
         self.sf_file = os.path.join(self.reports_dir, 'siegfried.csv')
         self.dup_report = os.path.join(self.reports_dir, 'duplicates.csv')
         self.disktype_output = os.path.join(self.reports_dir, 'disktype.txt')
@@ -181,43 +181,43 @@ class ItemBarcode(Shipment):
         self.checksums = os.path.join(self.temp_dir, 'checksums.txt')
 
         #metadata files
-        self.dfxml_output = os.path.join(self.metadata_dir, '{}-dfxml.xml'.format(self.item_barcode))
-        self.premis_xml_file = os.path.join(self.metadata_dir, '{}-premis.xml'.format(self.item_barcode))
+        self.dfxml_output = os.path.join(self.metadata_dir, '{}-dfxml.xml'.format(self.identifier))
+        self.premis_xml_file = os.path.join(self.metadata_dir, '{}-premis.xml'.format(self.identifier))
         
         self.current_dict = self.pickle_load('dict', 'current_dict')
         
         #special vars for RipstationBatch
         if self.controller.get_current_tab() == 'RipStation Ingest':
-            self.rs_wav_file = os.path.join(self.files_dir, "{}.wav".format(self.item_barcode))
-            self.rs_wav_cue = os.path.join(self.files_dir, "{}.cue".format(self.item_barcode))
-            self.rs_cdr_bin = os.path.join(self.image_dir, "{}-01.bin".format(self.item_barcode))
-            self.rs_cdr_toc = os.path.join(self.image_dir, "{}-01.toc".format(self.item_barcode))
-            self.rs_cdr_cue = os.path.join(self.image_dir, "{}-01.cue".format(self.item_barcode))
+            self.rs_wav_file = os.path.join(self.files_dir, "{}.wav".format(self.identifier))
+            self.rs_wav_cue = os.path.join(self.files_dir, "{}.cue".format(self.identifier))
+            self.rs_cdr_bin = os.path.join(self.image_dir, "{}-01.bin".format(self.identifier))
+            self.rs_cdr_toc = os.path.join(self.image_dir, "{}-01.toc".format(self.identifier))
+            self.rs_cdr_cue = os.path.join(self.image_dir, "{}-01.cue".format(self.identifier))
             self.ripstation_item_log = os.path.join(self.log_dir, 'ripstation.txt')
-            self.ripstation_orig_imagefile = os.path.join(self.image_dir, '{}.iso'.format(self.item_barcode))
+            self.ripstation_orig_imagefile = os.path.join(self.image_dir, '{}.iso'.format(self.identifier))
         
     def prep_barcode(self):
         
-        current_spreadsheet = Spreadsheet(self.controller)
+        shipment_spreadsheet = Spreadsheet(self.controller)
 
         #verify spreadsheet--make sure we only have 1 & that it follows naming conventions
         if self.controller.get_current_tab() == 'BDPL Ingest':
-            status, msg = current_spreadsheet.verify_spreadsheet()
+            status, msg = shipment_spreadsheet.verify_spreadsheet()
             if not status:
                 return (status, msg)
 
         #make sure spreadsheet is not open
-        if current_spreadsheet.already_open():
-            return (False, '\n\nWARNING: {} is currently open.  Close file before continuing and/or contact digital preservation librarian if other users are involved.'.format(current_spreadsheet.spreadsheet))
+        if shipment_spreadsheet.already_open():
+            return (False, '\n\nWARNING: {} is currently open.  Close file before continuing and/or contact digital preservation librarian if other users are involved.'.format(shipment_spreadsheet.spreadsheet))
             
         #open spreadsheet and make sure current item exists in spreadsheet; if not, return
-        current_spreadsheet.open_wb()
-        status, row = current_spreadsheet.return_row(current_spreadsheet.inv_ws)
+        shipment_spreadsheet.open_wb()
+        status, row = shipment_spreadsheet.return_row(shipment_spreadsheet.inv_ws)
         if not status:
             return (False, '\n\nWARNING: barcode was not found in spreadsheet.  Make sure value is entered correctly and/or check spreadsheet for value.  Consult with digital preservation librarian as needed.')
         
         #load metadata into item object
-        self.load_item_metadata(current_spreadsheet, row)
+        self.load_item_metadata(shipment_spreadsheet, row)
         
         #assign variables to GUI
         if self.controller.get_current_tab() == 'BDPL Ingest':
@@ -248,31 +248,31 @@ class ItemBarcode(Shipment):
             if len(premis_list) > 0:
                 print('\n\nIngest of item has been initiated; the following procedures have been completed:\n\t{}'.format('\n\t'.join(list(set((i['eventType'] for i in premis_list))))))
                 
-    def load_item_metadata(self, current_spreadsheet):
+    def load_item_metadata(self, shipment_spreadsheet):
         
         #if dict is empty, get info from Inventory spreadsheet
         if len(self.current_dict) == 0:
             #get info from inventory sheet
-            ws_columns = current_spreadsheet.get_spreadsheet_columns(current_spreadsheet.inv_ws)
+            ws_columns = shipment_spreadsheet.get_spreadsheet_columns(shipment_spreadsheet.inv_ws)
             
-            item_row = current_spreadsheet.return_row(current_spreadsheet.inv_ws)[1]
+            item_row = shipment_spreadsheet.return_row(shipment_spreadsheet.inv_ws)[1]
             
             for key in ws_columns.keys():
-                if key == 'item_barcode':
-                    self.current_dict['item_barcode'] = self.item_barcode
+                if key == 'identifier':
+                    self.current_dict['identifier'] = self.identifier
                 else:
-                    self.current_dict[key] = current_spreadsheet.inv_ws.cell(row=item_row, column=ws_columns[key]).value
+                    self.current_dict[key] = shipment_spreadsheet.inv_ws.cell(row=item_row, column=ws_columns[key]).value
 
         #now check if we need to update with any info from appraisal worksheet
-        status, row = current_spreadsheet.return_row(current_spreadsheet.app_ws)        
+        status, row = shipment_spreadsheet.return_row(shipment_spreadsheet.app_ws)        
         if status:
-            ws_columns = current_spreadsheet.get_spreadsheet_columns(current_spreadsheet.app_ws)
+            ws_columns = shipment_spreadsheet.get_spreadsheet_columns(shipment_spreadsheet.app_ws)
         
             for key in ws_columns.keys():
-                if key == 'item_barcode':
-                    self.current_dict['item_barcode'] = self.item_barcode
+                if key == 'identifier':
+                    self.current_dict['identifier'] = self.identifier
                 else:
-                    self.current_dict[key] = current_spreadsheet.app_ws.cell(row=row, column=ws_columns[key]).value
+                    self.current_dict[key] = shipment_spreadsheet.app_ws.cell(row=row, column=ws_columns[key]).value
         
         #add additional elements required for SDA deposit
         if not self.current_dict.get['unit_name']:
@@ -352,7 +352,7 @@ class ItemBarcode(Shipment):
             
             #if source is in 'Z:/bdpl_transfer_list', the path_to_content is a file
             if 'bdpl_transfer_list' in self.path_to_content:
-                self.path_to_content = os.path.join(self.path_to_content, '{}.txt'.format(self.item_barcode))
+                self.path_to_content = os.path.join(self.path_to_content, '{}.txt'.format(self.identifier))
                 
             return (True, 'Ready to transfer')
         
@@ -1125,7 +1125,7 @@ class ItemBarcode(Shipment):
                 
                 timestamp = str(datetime.datetime.now())
                 
-                ffmpegout = os.path.join(self.files_dir, '{}-{}.mpg'.format(self.item_barcode, str(title).zfill(2)))
+                ffmpegout = os.path.join(self.files_dir, '{}-{}.mpg'.format(self.identifier, str(title).zfill(2)))
                 ffmpeg_cmd = 'ffmpeg -y -nostdin -loglevel warning -report -stats -i "concat:{}" -c copy -target ntsc-dvd {}'.format('|'.join(titlelist), ffmpegout)
                 
                 print('\n\tGenerating title {} of {}: {}\n'.format(str(title), str(titlecount), ffmpegout))
@@ -1137,7 +1137,7 @@ class ItemBarcode(Shipment):
                 
                 #move and rename ffmpeg log file
                 ffmpeglog = glob.glob(os.path.join(self.ffmpeg_temp_dir, 'ffmpeg-*.log'))[0]
-                shutil.move(ffmpeglog, os.path.join(self.log_dir, '{}-{}-ffmpeg.log'.format(item_barcode, str(title).zfill(2))))
+                shutil.move(ffmpeglog, os.path.join(self.log_dir, '{}-{}-ffmpeg.log'.format(identifier, str(title).zfill(2))))
                 
         #move back to original directory
         os.chdir(bdpl_cwd)
@@ -1177,9 +1177,9 @@ class ItemBarcode(Shipment):
         
         #for each session, create a bin/toc file
         for x in range(1, (sessions+1)):
-            cdr_bin = os.path.join(self.image_dir, "{}-{}.bin").format(self.item_barcode, str(x).zfill(2))
-            cdr_toc = os.path.join(self.image_dir, "{}-{}.toc").format(self.item_barcode, str(x).zfill(2))
-            cdr_log = os.path.join(self.image_dir, "{}-{}.log").format(self.item_barcode, str(x).zfill(2))
+            cdr_bin = os.path.join(self.image_dir, "{}-{}.bin").format(self.identifier, str(x).zfill(2))
+            cdr_toc = os.path.join(self.image_dir, "{}-{}.toc").format(self.identifier, str(x).zfill(2))
+            cdr_log = os.path.join(self.image_dir, "{}-{}.log").format(self.identifier, str(x).zfill(2))
             
             print('\n\tGenerating session {} of {}: {}\n\n'.format(str(x), str(sessions), cdr_bin))
             
@@ -1194,8 +1194,8 @@ class ItemBarcode(Shipment):
             self.record_premis(timestamp, 'disk image creation', exitcode, cdr_cmd, 'Extracted a disk image from the physical information carrier.', cdrdao_ver)
                         
             #convert TOC to CUE
-            cue = os.path.join(self.image_dir, "{}-{}.cue").format(self.item_barcode, str(sessions).zfill(2))
-            cue_log = os.path.join(self.log_dir, "{}-{}_toc2cue.log").format(self.item_barcode, str(sessions).zfill(2))
+            cue = os.path.join(self.image_dir, "{}-{}.cue").format(self.identifier, str(sessions).zfill(2))
+            cue_log = os.path.join(self.log_dir, "{}-{}_toc2cue.log").format(self.identifier, str(sessions).zfill(2))
             t2c_cmd = 'toc2cue {} {} > {} 2>&1'.format(cdr_toc, cue, cue_log)
             timestamp = str(datetime.datetime.now())
             exitcode2 = subprocess.call(t2c_cmd, shell=True, text=True)
@@ -1216,11 +1216,11 @@ class ItemBarcode(Shipment):
             
             #place a copy of the .cue file for the first session in files_dir for the forthcoming WAV; this session will have audio data
             if x == 1:
-                new_cue = os.path.join(self.files_dir, '{}.cue'.format(self.item_barcode))
+                new_cue = os.path.join(self.files_dir, '{}.cue'.format(self.identifier))
                 
                 #now write the new cue file
                 with open(new_cue, 'w') as outfile:
-                    outfile.write('FILE "{}.wav" WAVE\n'.format(self.item_barcode))
+                    outfile.write('FILE "{}.wav" WAVE\n'.format(self.identifier))
                     
                 with open(new_cue, 'ab') as outfile:
                     for line in cue_info:
@@ -1672,7 +1672,7 @@ class ItemBarcode(Shipment):
         conn.close()
         
         #save information to current_dict     
-        self.current_dict.update({'Source': self.item_barcode, 'begin_date': self.begin_date, 'end_date' : self.end_date, 'extent_normal': self.total_size, 'extent_raw': self.total_size_bytes, 'item_file_count': self.num_files, 'item_duplicate_count': self.distinct_dupes, 'FormatCount': self.num_formats, 'item_unidentified_count': self.unidentified_files})  
+        self.current_dict.update({'Source': self.identifier, 'begin_date': self.begin_date, 'end_date' : self.end_date, 'extent_normal': self.total_size, 'extent_raw': self.total_size_bytes, 'item_file_count': self.num_files, 'item_duplicate_count': self.distinct_dupes, 'FormatCount': self.num_formats, 'item_unidentified_count': self.unidentified_files})  
         
         #get additional metadata from PREMIS about transfer
         premis_list = self.pickle_load('ls', 'premis_list')
@@ -1705,8 +1705,8 @@ class ItemBarcode(Shipment):
             self.current_dict['technician_note'] = self.controller.tabs['BdplIngest'].bdpl_technician_note.get(1.0, tk.END)
         
         #add linked information
-        self.current_dict['full_report'] = '=HYPERLINK(".\\{}\\metadata\\reports\\report.html", "View report")'.format(self.item_barcode)
-        self.current_dict['transfer_link'] = '=HYPERLINK("{}", "View transfer folder")'.format(self.item_barcode)
+        self.current_dict['full_report'] = '=HYPERLINK(".\\{}\\metadata\\reports\\report.html", "View report")'.format(self.identifier)
+        self.current_dict['transfer_link'] = '=HYPERLINK("{}", "View transfer folder")'.format(self.identifier)
         
         try:
             if self.current_dict['initial_appraisal'] in ["No appraisal needed", "Move to SDA", "Transfer to SDA"]:
@@ -1735,7 +1735,7 @@ class ItemBarcode(Shipment):
         html_doc.write('<!DOCTYPE html>')
         html_doc.write('\n<html lang="en">')
         html_doc.write('\n<head>')
-        html_doc.write('\n<title>IUL Born Digital Preservation Lab report: {}</title>'.format(self.item_barcode))
+        html_doc.write('\n<title>IUL Born Digital Preservation Lab report: {}</title>'.format(self.identifier))
         html_doc.write('\n<meta http-equiv="Content-Type" content="text/html; charset=utf-8">')
         html_doc.write('\n<meta name="description" content="HTML report based upon a template developed by Tim Walsh and distributed as part of Brunnhilde v. 1.7.2">')
         html_doc.write('\n<link rel="stylesheet" href="./assets//css/bootstrap.min.css">')
@@ -1782,7 +1782,7 @@ class ItemBarcode(Shipment):
         elif self.job_type == 'Disk_image':
             html_doc.write('\n<p><strong>Input source: Physical media: {}</strong></p>'.format(self.current_dict.get('content_source_type', 'Unidentified')))
             
-        html_doc.write('\n<p><strong>Item identifier:</strong> {}</p>'.format(self.item_barcode))
+        html_doc.write('\n<p><strong>Item identifier:</strong> {}</p>'.format(self.identifier))
         html_doc.write('\n</div>')
         html_doc.write('\n</div>')
         html_doc.write('\n</div>')
@@ -2049,7 +2049,7 @@ class ItemBarcode(Shipment):
         objectIdentifierType = etree.SubElement(objectIdentifier, PREMIS + 'objectIdentifierType')
         objectIdentifierType.text = 'local'
         objectIdentifierValue = etree.SubElement(objectIdentifier, PREMIS + 'objectIdentifierValue')
-        objectIdentifierValue.text = self.item_barcode
+        objectIdentifierValue.text = self.identifier
         objectCharacteristics = etree.SubElement(object, PREMIS + 'objectCharacteristics')
         compositionLevel = etree.SubElement(objectCharacteristics, PREMIS + 'compositionLevel')
         compositionLevel.text = '0'
@@ -2120,7 +2120,7 @@ class ItemBarcode(Shipment):
             linkingObjectIDtype = etree.SubElement(linkingObjectID, PREMIS + 'linkingObjectIdentifierType')
             linkingObjectIDtype.text = 'local'
             linkingObjectIDvalue = etree.SubElement(linkingObjectID, PREMIS + 'linkingObjectIdentifierValue')
-            linkingObjectIDvalue.text = self.item_barcode
+            linkingObjectIDvalue.text = self.identifier
         
         premis_tree = etree.ElementTree(root)
         
@@ -2402,14 +2402,14 @@ class ItemBarcode(Shipment):
         self.print_premis()
         
         #write info to spreadsheet for collecting unit to review.  Create a spreadsheet object, make sure spreadsheet isn't already open, and if OK, proceed to open and write info.
-        current_spreadsheet = Spreadsheet(self.controller)
+        shipment_spreadsheet = Spreadsheet(self.controller)
         
-        if current_spreadsheet.already_open():
-            print('\n\nWARNING: {} is currently open.  Close file before continuing and/or contact digital preservation librarian if other users are involved.'.format(current_spreadsheet.spreadsheet))
+        if shipment_spreadsheet.already_open():
+            print('\n\nWARNING: {} is currently open.  Close file before continuing and/or contact digital preservation librarian if other users are involved.'.format(shipment_spreadsheet.spreadsheet))
             return
         
-        current_spreadsheet.open_wb()
-        current_spreadsheet.write_to_spreadsheet(self.current_dict)
+        shipment_spreadsheet.open_wb()
+        shipment_spreadsheet.write_to_spreadsheet(self.current_dict)
            
         #create file to indicate that process was completed
         if not os.path.exists(self.done_file):
@@ -2435,7 +2435,7 @@ class ItemBarcode(Shipment):
         
         '''if using gui, print final details about item'''
         if self.controller.get_current_tab() == 'BDPL Ingest':
-            print('\n\n--------------------------------------------------------------------------------------------------\n\nINGEST PROCESS COMPLETED FOR ITEM {}\n\nResults:\n'.format(self.item_barcode))
+            print('\n\n--------------------------------------------------------------------------------------------------\n\nINGEST PROCESS COMPLETED FOR ITEM {}\n\nResults:\n'.format(self.identifier))
             
             du_cmd = 'du64.exe -nobanner "{}" > {}'.format(self.files_dir, self.final_stats)
             
@@ -2459,7 +2459,7 @@ class Spreadsheet(Shipment):
         Shipment.__init__(self, controller)
         
         self.controller = controller        
-        self.item_barcode = self.controller.item_barcode.get()
+        self.identifier = self.controller.identifier.get()
     
     def open_wb(self):
         self.wb = openpyxl.load_workbook(self.spreadsheet)
@@ -2489,7 +2489,7 @@ class Spreadsheet(Shipment):
             #if barcode exists in spreadsheet, set variable to that row
             for cell in ws['A']:
                 if (cell.value is not None):
-                    if self.item_barcode == str(cell.value).strip():
+                    if self.identifier == str(cell.value).strip():
                         row = cell.row
                         found = True
                         break
@@ -2515,7 +2515,7 @@ class Spreadsheet(Shipment):
         for cell in ws[1]:
             if not cell.value is None:
                 if 'identifier' in str(cell.value).lower():
-                    spreadsheet_columns['item_barcode'] = cell.column
+                    spreadsheet_columns['identifier'] = cell.column
                 elif cell.value.lower().strip() == 'unit':
                     spreadsheet_columns['unit_name'] = cell.column
                 elif cell.value.lower().strip() == 'shipmentID':
@@ -2704,7 +2704,7 @@ class ManualPremisEvent(tk.Toplevel):
         
         #self.db = 
         
-        if self.controller.get_current_tab() != 'BDPL Ingest' or self.controller.item_barcode.get()=='':
+        if self.controller.get_current_tab() != 'BDPL Ingest' or self.controller.identifier.get()=='':
             self.get_info_frame = tk.Frame(self)
             self.get_info_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
             
@@ -2717,9 +2717,9 @@ class ManualPremisEvent(tk.Toplevel):
             tk.Button(self.get_info_frame, text = 'Use barcode', bg='light slate gray', command=self.add_barcode_value).grid(row=1, column=0, padx=10, pady=10, sticky="nsew")
             tk.Button(self.get_info_frame, text = 'Cancel', bg='light slate gray', command=self.close_top).grid(row=1, column=1, padx=10, pady=10, sticky="nsew")
         
-        self.barcode_item = ItemBarcode(self.controller)
+        self.barcode_item = DigitalObject(self.controller)
 
-        self.event_frame = tk.LabelFrame(self, text='Item Barcode: {}'.format(self.controller.item_barcode.get()))
+        self.event_frame = tk.LabelFrame(self, text='Item Barcode: {}'.format(self.controller.identifier.get()))
         self.event_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
         self.timestamp_frame = tk.LabelFrame(self, text='Timestamp Information')
         self.timestamp_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
@@ -2785,12 +2785,12 @@ class ManualPremisEvent(tk.Toplevel):
             print('\n\nWARNING: Be sure to enter a barcode value')
             return
         else:
-            self.controller.item_barcode.set(self.barcode_entry.get().trim())
+            self.controller.identifier.set(self.barcode_entry.get().trim())
         
-        current_spreadsheet = Spreadsheet(self.controller)
-        current_spreadsheet.open_wb()
+        shipment_spreadsheet = Spreadsheet(self.controller)
+        shipment_spreadsheet.open_wb()
         
-        if not current_spreadsheet.return_row(current_spreadsheet.inv_ws)[0]:
+        if not shipment_spreadsheet.return_row(shipment_spreadsheet.inv_ws)[0]:
             print('\n\nWARNING: Barcode value does not appear in spreadsheet')
             return
         else:
@@ -2891,52 +2891,52 @@ class RipstationBatch(Shipment):
             print('\nWorking on item: {}'.format(item))
             
             #set our barcode variable and create barcode object
-            self.controller.item_barcode.set(item)
-            current_barcode = ItemBarcode(self.controller)
+            self.controller.identifier.set(item)
+            current_item = DigitalObject(self.controller)
                 
             #if item has already failed, skip it.
-            if self.controller.check_list(self.failed_ingest_report, current_barcode.item_barcode):
+            if self.controller.check_list(self.failed_ingest_report, current_item.identifier):
                 print('\nThis item previously failed.  Moving on to next item...')
                 continue
                 
             #prep barcode; proceed to next item if any errors
-            if not self.controller.check_list(self.replicated_report, current_barcode.item_barcode):
+            if not self.controller.check_list(self.replicated_report, current_item.identifier):
                 
                 print('\nLOADING METADATA AND CREATING FOLDERS...')
                 
-                status, msg = current_barcode.prep_barcode()
+                status, msg = current_item.prep_barcode()
                 if not status:
-                    self.controller.write_list(self.failed_ingest_report, '{}\t{}'.format(current_barcode.item_barcode, msg))
+                    self.controller.write_list(self.failed_ingest_report, '{}\t{}'.format(current_item.identifier, msg))
                     continue
                 
                 if self.ripstation_ingest_option == 'CDs':
                     #set job_type
-                    current_barcode.job_type = 'CDDA'
+                    current_item.job_type = 'CDDA'
                     
                     #make sure .WAV and .CUE file were produced
                     try:
-                        current_barcode.orig_rs_cue = glob.glob(os.path.join(current_barcode.files_dir, '*.cue'))[0]
+                        current_item.orig_rs_cue = glob.glob(os.path.join(current_item.files_dir, '*.cue'))[0]
                     except IndexError:
                         print("\nMissing '.cue' file; moving on to next item...")
-                        self.controller.write_list(self.failed_ingest_report, '{}\tMissing .cue file'.format(current_barcode.item_barcode))
+                        self.controller.write_list(self.failed_ingest_report, '{}\tMissing .cue file'.format(current_item.identifier))
                         continue
                     
-                    if not os.path.exists(current_barcode.rs_wav_file):
+                    if not os.path.exists(current_item.rs_wav_file):
                         print("\nMissing '.wav' file; moving on to next item...")
-                        self.controller.write_list(self.failed_ingest_report, '{}\tMissing .wav file'.format(current_barcode.item_barcode))
+                        self.controller.write_list(self.failed_ingest_report, '{}\tMissing .wav file'.format(current_item.identifier))
                         continue
                     
                     #write premis information for creating WAV; we assume that this operation was successful
-                    timestamp = datetime.datetime.fromtimestamp(os.path.getmtime(current_barcode.rs_wav_file)).isoformat()
+                    timestamp = datetime.datetime.fromtimestamp(os.path.getmtime(current_item.rs_wav_file)).isoformat()
                     
-                    current_barcode.record_premis(timestamp, 'normalization', 0, 'RipStation BR6-7604 batch .WAV file creation', 'Transformed object to an institutionally supported preservation format (.WAV).', 'RipStation V4.4.13.0')
+                    current_item.record_premis(timestamp, 'normalization', 0, 'RipStation BR6-7604 batch .WAV file creation', 'Transformed object to an institutionally supported preservation format (.WAV).', 'RipStation V4.4.13.0')
                     
                     #save ripstation log information for disc to log_dir.  Have to get album # from txt file...
-                    txt_file = glob.glob(os.path.join(current_barcode.files_dir, '*.txt'))[0]
+                    txt_file = glob.glob(os.path.join(current_item.files_dir, '*.txt'))[0]
                     
                     album_number = os.path.splitext(os.path.basename(txt_file))[0]
 
-                    with open(current_barcode.ripstation_item_log, 'w') as outf:
+                    with open(current_item.ripstation_item_log, 'w') as outf:
                         outf.write('RipStation V4.4.13.0\n')
                         with open(self.ripstation_log, 'r') as inf:
                             for line in inf.read().splitlines():
@@ -2960,18 +2960,18 @@ class RipstationBatch(Shipment):
                     channels = audio_dict['channels']
                     
                     #now create bin file with raw 16 bit little-endian PCM 
-                    cmd = 'ffmpeg -y -i {} -hide_banner -ar {} -ac {} -f s16le -acodec pcm_s16le {}'.format(current_barcode.rs_wav_file, sample_rate, channels, current_barcode.rs_cdr_bin)
+                    cmd = 'ffmpeg -y -i {} -hide_banner -ar {} -ac {} -f s16le -acodec pcm_s16le {}'.format(current_item.rs_wav_file, sample_rate, channels, current_item.rs_cdr_bin)
                     
                     timestamp = str(datetime.datetime.now())
                     exitcode_bin = subprocess.call(cmd, shell=True)
                     
                     ffmpeg_ver = '; '.join(subprocess.check_output('"C:\\Program Files\\ffmpeg\\bin\\ffmpeg" -version', shell=True, text=True).splitlines()[0:2])
                
-                    current_barcode.record_premis(timestamp, 'normalization', exitcode_bin, cmd, 'Transformed object to an institutionally supported preservation format (.BIN)', ffmpeg_ver)
+                    current_item.record_premis(timestamp, 'normalization', exitcode_bin, cmd, 'Transformed object to an institutionally supported preservation format (.BIN)', ffmpeg_ver)
                     
                     #correct cue file; save to file_dir.  
-                    with open(current_barcode.rs_wav_cue, 'w') as outfile:
-                        with open(current_barcode.orig_rs_cue, 'r') as infile:
+                    with open(current_item.rs_wav_cue, 'w') as outfile:
+                        with open(current_item.orig_rs_cue, 'r') as infile:
                             for line in infile.readlines():
                                 if line.startswith('FILE'):
                                     outfile.write(line.replace('WAV1', 'WAVE'))
@@ -2979,153 +2979,153 @@ class RipstationBatch(Shipment):
                                     outfile.write(line)
                     
                     #copy corrected cue file to image_dir; correct FILE reference
-                    with open(current_barcode.rs_cdr_cue, 'w') as outfile:
-                        with open(current_barcode.rs_wav_cue, 'r') as infile:
+                    with open(current_item.rs_cdr_cue, 'w') as outfile:
+                        with open(current_item.rs_wav_cue, 'r') as infile:
                             for line in infile.readlines():
                                 if line.startswith('FILE'):
-                                    outfile.write('FILE "{}" BINARY\n'.format(os.path.basename(current_barcode.rs_cdr_bin)))
+                                    outfile.write('FILE "{}" BINARY\n'.format(os.path.basename(current_item.rs_cdr_bin)))
                                 elif line.startswith('  TRACK') or line.startswith('    INDEX'):
                                     outfile.write(line)
                     
                     #remove original cue and txt file        
-                    os.remove(current_barcode.orig_rs_cue)
+                    os.remove(current_item.orig_rs_cue)
                     os.remove(txt_file)
                     
                     #create toc file
                     cue2toc_ver = subprocess.check_output('cue2toc -v', text=True).split('\n')[0]
                     timestamp = str(datetime.datetime.now())
-                    cmd = 'cue2toc -o {} {}'.format(current_barcode.rs_cdr_toc, current_barcode.rs_cdr_cue)
+                    cmd = 'cue2toc -o {} {}'.format(current_item.rs_cdr_toc, current_item.rs_cdr_cue)
                     exitcode = subprocess.call(cmd, shell=True, text=True)
                     
                     #record premis
-                    current_barcode.record_premis(timestamp, 'metadata modification', exitcode, cmd, "Converted the CD's .CUE file to the table of contents (.TOC) format.", cue2toc_ver)
+                    current_item.record_premis(timestamp, 'metadata modification', exitcode, cmd, "Converted the CD's .CUE file to the table of contents (.TOC) format.", cue2toc_ver)
                     
                     #record successful completion
-                    self.controller.write_list(self.replicated_report, current_barcode.item_barcode)
+                    self.controller.write_list(self.replicated_report, current_item.identifier)
                     
                 elif self.ripstation_ingest_option == 'DVD_Data':
                     
                     #make sure we can account for our original .ISO imagefile
-                    if not os.path.exists(current_barcode.ripstation_orig_imagefile):
+                    if not os.path.exists(current_item.ripstation_orig_imagefile):
                     
-                        if os.path.exists(current_barcode.imagefile):
+                        if os.path.exists(current_item.imagefile):
                             print('\n.ISO file already changed to .DD; converting back to complete operations.')
-                            os.rename(current_barcode.imagefile, current_barcode.ripstation_orig_imagefile)
+                            os.rename(current_item.imagefile, current_item.ripstation_orig_imagefile)
                             
-                        elif os.path.exists(os.path.join(current_barcode.image_dir, '{}.mdf'.format(current_barcode.item_barcode))):
+                        elif os.path.exists(os.path.join(current_item.image_dir, '{}.mdf'.format(current_item.identifier))):
                             print('\nWARNING: item is Compact Disc Digital Audio; unable to transfer using RipStation DataGrabber.')
-                            self.controller.write_list(self.failed_ingest_report, '{}\tDisc is CDDA; transfer using original RipStation'.format(current_barcode.item_barcode))
+                            self.controller.write_list(self.failed_ingest_report, '{}\tDisc is CDDA; transfer using original RipStation'.format(current_item.identifier))
                             continue
                             
                         else:
                             print('\nWARNING: disk image does not exist!  Moving on to next item...')
-                            self.controller.write_list(self.failed_ingest_report, '{}\tDisk image does not exist'.format(current_barcode.item_barcode))
+                            self.controller.write_list(self.failed_ingest_report, '{}\tDisk image does not exist'.format(current_item.identifier))
                             continue
                     
                     #write premis information for disk image creation.  Even if image is unreadable, we assume that this operation was successful
-                    timestamp = datetime.datetime.fromtimestamp(os.path.getmtime(current_barcode.ripstation_orig_imagefile)).isoformat()
+                    timestamp = datetime.datetime.fromtimestamp(os.path.getmtime(current_item.ripstation_orig_imagefile)).isoformat()
                     
-                    current_barcode.record_premis(timestamp, 'disk image creation', 0, 'RipStation BR6-7604 ISO image batch operation', 'Extracted a disk image from the physical information carrier.', 'RipStation DataGrabber V1.0.35.0')
+                    current_item.record_premis(timestamp, 'disk image creation', 0, 'RipStation BR6-7604 ISO image batch operation', 'Extracted a disk image from the physical information carrier.', 'RipStation DataGrabber V1.0.35.0')
                     
                     #save ripstation log information for disc to log_dir.  Make sure it's only written once...
-                    with open(current_barcode.ripstation_item_log, 'w') as outf:
+                    with open(current_item.ripstation_item_log, 'w') as outf:
                         outf.write('RipStation DataGrabber V1.0.35.0\n')
                         with open(self.ripstation_log, 'r') as inf:
                             for line in inf.read().splitlines():
-                                if current_barcode.item_barcode in line:
+                                if current_item.identifier in line:
                                     outf.write('{} {}\n' % (self.rs_timestamp, line))
                     
                     #mount .ISO so we can verify disk image type
-                    exitcode = current_barcode.mount_iso()
+                    exitcode = current_item.mount_iso()
                     if exitcode != 0:
                         print('\nWARNING: failed to mount disk image!  Moving on to next item...')
-                        self.controller.write_list(self.failed_ingest_report, '{}\tFailed to mount disk image'.format(current_barcode.item_barcode))
+                        self.controller.write_list(self.failed_ingest_report, '{}\tFailed to mount disk image'.format(current_item.identifier))
                         continue
                     
                     #set media_attached variable to true: confirms that 'media' (mounted disk image) is present; required by bdpl_ingest functions
                     self.controller.media_attached.set(True)
-                    current_barcode.media_attached = self.controller.media_attached.get()
+                    current_item.media_attached = self.controller.media_attached.get()
                     
                     #get drive letter for newly mounted disk image
-                    drive_letter = current_barcode.get_iso_drive_letter()
+                    drive_letter = current_item.get_iso_drive_letter()
                     
                     #run lsdvd to determine if job_type is DVD or Disk_image
                     print('\nCHECKING IF DISC IS DATA OR DVD-VIDEO...')
-                    titlecount, title_format = lsdvd_check(folders, item_barcode, drive_letter)
+                    titlecount, title_format = lsdvd_check(folders, identifier, drive_letter)
                     
                     #fail if disc is PAL-formatted
                     if title_format == 'PAL':
                         print('\nWARNING: PAL-formatted DVD; need to develop appropriate procedures...')
-                        self.controller.write_list(self.failed_ingest_report, '{}\tFailed replication: PAL-formatted DVD'.format(current_barcode.item_barcode))
+                        self.controller.write_list(self.failed_ingest_report, '{}\tFailed replication: PAL-formatted DVD'.format(current_item.identifier))
                         continue
                     
                     if titlecount == 0:
-                        current_barcode.job_type = 'Disk_image'
+                        current_item.job_type = 'Disk_image'
                         
                         #dismount disk image
-                        exitcode = current_barcode.dismount_iso()
+                        exitcode = current_item.dismount_iso()
                         if exitcode != 0:
                             print('\nWARNING: failed to dismount disk image!  Moving on to next item...')
-                            self.controller.write_list(self.failed_ingest_report, '{}\tFailed to dismount disk image'.format(current_barcode.item_barcode))
+                            self.controller.write_list(self.failed_ingest_report, '{}\tFailed to dismount disk image'.format(current_item.identifier))
                             continue
                         
                         #rename to '.dd' file extension
                         timestamp = str(datetime.datetime.now())
                         
-                        os.rename(current_barcode.ripstation_orig_imagefile, current_barcode.imagefile)
+                        os.rename(current_item.ripstation_orig_imagefile, current_item.imagefile)
                         
                         #document change to filename
-                        current_barcode.record_premis(timestamp, 'filename change', 0, 'os.rename({}, {})'.format(current_barcode.ripstation_orig_imagefile, current_barcode.imagefile), 'Modified the filename, changing extension from .ISO to .DD to ensure consistency with IUL BDPL practices', 'Python %s' % sys.version.split()[0])
+                        current_item.record_premis(timestamp, 'filename change', 0, 'os.rename({}, {})'.format(current_item.ripstation_orig_imagefile, current_item.imagefile), 'Modified the filename, changing extension from .ISO to .DD to ensure consistency with IUL BDPL practices', 'Python %s' % sys.version.split()[0])
                     
                         #next, get technical metadata from disk image and replicate files so we can run additional analyses (this step will also involve creating DFXML and correcting MAC times)
-                        current_barcode.disk_image_info()
-                        current_barcode.disk_image_replication()
+                        current_item.disk_image_info()
+                        current_item.disk_image_replication()
                     
                     else:
-                        current_barcode.job_type = 'DVD'
+                        current_item.job_type = 'DVD'
                         
-                        current_barcode.normalize_dvd_content(titlecount, drive_letter)
+                        current_item.normalize_dvd_content(titlecount, drive_letter)
                         
                         #dismount disk image
                         print('\nDISMOUNTING DISK IMAGE FILE...') 
-                        exitcode = current_barcode.dismount_iso()
+                        exitcode = current_item.dismount_iso()
                         if exitcode != 0:
                             print('\nWARNING: failed to dismount disk image!  Moving on to next item...')
-                            self.controller.write_list(self.failed_ingest_report, '{}\tFailed to dismount disk image'.format(current_barcode.item_barcode))
+                            self.controller.write_list(self.failed_ingest_report, '{}\tFailed to dismount disk image'.format(current_item.identifier))
                             continue
                             
                         #rename to '.dd' file extension
-                        os.rename(current_barcode.ripstation_orig_imagefile, current_barcode.imagefile)
+                        os.rename(current_item.ripstation_orig_imagefile, current_item.imagefile)
                     
                     #record successful status if files exist; otherwise note failure
-                    if current_barcode.check_files(current_barcode.files_dir):
-                        self.controller.write_list(self.replicated_report, current_barcode.item_barcode)
+                    if current_item.check_files(current_item.files_dir):
+                        self.controller.write_list(self.replicated_report, current_item.identifier)
                     else:
                         print('\nWARNING: failed to replicate files!  Moving on to next item...')
-                        self.controller.write_list(self.failed_ingest_report, '{}\tFailed to replicate files'.format(current_barcode.item_barcode))
+                        self.controller.write_list(self.failed_ingest_report, '{}\tFailed to replicate files'.format(current_item.identifier))
                         continue
             
-            if not self.controller.check_list(self.analyzed_report, current_barcode.item_barcode):
-                current_barcode.run_item_analysis()
+            if not self.controller.check_list(self.analyzed_report, current_item.identifier):
+                current_item.run_item_analysis()
                 
                 #check procedures
                 jobs = ['virus check', 'metadata extraction', 'message digest calculation', 'format identification']
                 
-                if current_barcode.job_type == 'Disk_image':
+                if current_item.job_type == 'Disk_image':
                     jobs.append('sensitive data scan')
                 
                 failed_analysis_jobs = []
 
                 for job in jobs:
-                    if not current_barcode.check_premis(job):
+                    if not current_item.check_premis(job):
                         failed_analysis_jobs.append(job)
                 
                 if len(failed_analysis_jobs) > 0:
                     print('\nWARNING: analysis did not complete with:\n\t{}'.format('\n\t'.join(failed_analysis_jobs)))
-                    self.controller.write_list(self.failed_ingest_report, '{}\tFailed analysis job(s): {}'.format(current_barcode.item_barcode, ', '.join(failed_analysis_jobs)))
+                    self.controller.write_list(self.failed_ingest_report, '{}\tFailed analysis job(s): {}'.format(current_item.identifier, ', '.join(failed_analysis_jobs)))
                     continue
                 else:
-                    self.controller.write_list(self.analyzed_report, current_barcode.item_barcode)
+                    self.controller.write_list(self.analyzed_report, current_item.identifier)
                         
                         
     def clean_up(self):
@@ -3142,15 +3142,8 @@ class SdaBatchDeposit(Shipment):
         self.controller = controller
         self.separations_status = self.controller.separations_status.get()
         self.separations_file = self.controller.separations_file.get()
-        
-        self.master_spreadsheet = MasterSpreadsheet(self.controller)
-        
-        self.bdpl_archiver_drive = self.controller.bdpl_archiver_drive
-        self.bdpl_archiver_main_dir = os.path.join(self.controller.bdpl_archiver_spool_dir, 'general%2fmediaimages')
-        
+             
         self.bdpl_archiver_target = os.path.join(self.controller.bdpl_archiver_spool_dir, self.controller.tabs['SdaDeposit'].archiver_dir.get())
-        
-        self.bdpl_archiver_completed_spreadsheets = os.path.join(self.bdpl_archiver_drive, 'spreadsheets', 'completed_shipments')
         
         #set up deposit directories
         self.bag_report_dir = os.path.join(self.ship_dir, 'bag_reports')
@@ -3241,7 +3234,7 @@ class SdaBatchDeposit(Shipment):
         os.chdir(self.ship_dir)
         
         #barcodes in ship_dir
-        self.status_db['directory_barcodes'] = [d for d in os.listdir(self.ship_dir) if os.path.isdir(d) and not d in ['review', 'bag_reports', 'unaccounted', 'deaccessioned', 'ripstation_reports', 'reports']] #including legacy directory names; at some point, we will need to simplify this list
+        self.status_db['directory_barcodes'] = [d for d in os.listdir(self.ship_dir) if os.path.isdir(d) and not d in ['review', 'bag_reports', 'unaccounted', 'deaccessioned', 'ripstation_reports', 'mco_prep', 'reports']] #including legacy directory names; at some point, we will need to simplify this list
         
         #barcodes in shipment spreadsheet
         for barcode in shipment_spreadsheet.app_ws['A'][1:]:
@@ -3308,62 +3301,62 @@ class SdaBatchDeposit(Shipment):
         
         for item in self.status_db['directory_barcodes']:
 
-            #set item_barcode variable; create barcode object
-            self.controller.item_barcode.set(item.strip())
-            current_barcode = ItemBarcode(self.controller)
+            #set identifier variable; create barcode object
+            self.controller.identifier.set(item.strip())
+            current_item = DigitalObject(self.controller)
             
-            print('\nWorking on item: {}'.format(current_barcode.item_barcode))
+            print('\nWorking on item: {}'.format(current_item.identifier))
             
             #continue to next item if we've already completed item
-            if current_barcode.item_barcode in self.status_db['cleaned']:
-                print('\n{} completed.'.format(current_barcode.item_barcode))
+            if current_item.identifier in self.status_db['cleaned']:
+                print('\n{} completed.'.format(current_item.identifier))
                 continue            
             
             #load metadata
-            current_barcode.load_item_metadata(shipment_spreadsheet)
+            current_item.load_item_metadata(shipment_spreadsheet)
             
             #record status
-            if not current_barcode.item_barcode in self.status_db['started']:
-                self.write_db('started', current_barcode.item_barcode)
+            if not current_item.identifier in self.status_db['started']:
+                self.write_db('started', current_item.identifier)
             
             '''Check final_appraisal information for disposition of content'''
             ###ALSO CHECK IF BARCODE IS IN AN 'MCO-COMPLETED' LIST...
-            if 'mco' in current_barcode.current_dict['final_appraisal'].lower():
+            if 'mco' in current_item.current_dict['final_appraisal'].lower():
                 print('\n\nContent will be deposited to Media Collections Online. Moving on to next item...')
-                self.write_db('mco_deposit', current_barcode.item_barcode)
+                self.write_db('mco_deposit', current_item.identifier)
                 continue
                 
-            elif current_barcode.current_dict['final_appraisal'] == "Delete content":
+            elif current_item.current_dict['final_appraisal'] == "Delete content":
                 try:
                     print('\n\tContent will not be transferred to SDA.  Continuing with next item.')
-                    shutil.move(current_barcode.barcode_dir, self.deaccession_dir)
-                    self.write_db('deaccessioned', current_barcode.item_barcode)
+                    shutil.move(current_item.barcode_dir, self.deaccession_dir)
+                    self.write_db('deaccessioned', current_item.identifier)
                 
                 except (PermissionError, OSError) as e:
-                    self.write_db('failed', current_barcode.item_barcode, 'deaccession\t{}'.format(e))
+                    self.write_db('failed', current_item.identifier, 'deaccession\t{}'.format(e))
                         
                 continue
             
             #allow for additional transfer instructions (i.e., transfer to both MCO and SDA)
-            elif 'transfer' and 'sda' in current_barcode.current_dict['final_appraisal'].lower():
+            elif 'transfer' and 'sda' in current_item.current_dict['final_appraisal'].lower():
                         
                 '''PREPARE ITEM: VERIFY CONTENT IS PRESENT AND GET STATS'''
-                if not current_barcode.item_barcode in self.status_db['prepped']:
+                if not current_item.identifier in self.status_db['prepped']:
                     
                     #check if there are any reported files; double check image_dir
-                    if current_barcode.current_dict['item_file_count'] is None or current_barcode.current_dict['item_file_count'] == 0:
+                    if current_item.current_dict['item_file_count'] is None or current_item.current_dict['item_file_count'] == 0:
                     
-                        if not current_barcode.check_files(current_barcode.files_dir) and not current_barcode.check_files(current_barcode.image_dir):
+                        if not current_item.check_files(current_item.files_dir) and not current_item.check_files(current_item.image_dir):
                             
                             print('\n\tItem has no files or disk image!  Moving on...')
                             
-                            self.write_db('failed', current_barcode.item_barcode,  'check_folder\tNO CONTENT IN BARCODE FOLDER; CHANGE APPRAISAL DECISION?')
+                            self.write_db('failed', current_item.identifier,  'check_folder\tNO CONTENT IN BARCODE FOLDER; CHANGE APPRAISAL DECISION?')
                             
                             continue
                     
                     #set up barcode dict to collection format
-                    if not self.status_db['format_report'].get(current_barcode.item_barcode):
-                        self.status_db['format_report'][current_barcode.item_barcode] = {}
+                    if not self.status_db['format_report'].get(current_item.identifier):
+                        self.status_db['format_report'][current_item.identifier] = {}
                     
                     #get file format info
                     format_csv = os.path.join(self.reports_dir, 'formatVersions.csv')
@@ -3375,24 +3368,24 @@ class SdaBatchDeposit(Shipment):
                             #loop through format csv; create a dictionary for each row, recording the PUIDs (with format names and versions) and a count of each
                             for line in fi:
                                 puid = line[1]
-                                self.status_db['format_report'][current_barcode.item_barcode][puid] = {'format' : line[0], 'version' : line[2], 'count' : int(line[3])}
+                                self.status_db['format_report'][current_item.identifier][puid] = {'format' : line[0], 'version' : line[2], 'count' : int(line[3])}
                             self.status_db.sync()
                     
                     #item prepped: record status
-                    self.write_db('prepped', current_barcode.item_barcode)
+                    self.write_db('prepped', current_item.identifier)
                         
                 '''COMPLETE SEPARATIONS AND REMOVE TEMP & B_E FILES'''
-                if not current_barcode.item_barcode in self.status_db['separations_completed']:
+                if not current_item.identifier in self.status_db['separations_completed']:
                     print('\n\tSeparating unnecessary files...\n')
                     
                     #remove folders
-                    for dir in [current_barcode.temp_dir, current_barcode.bulkext_dir, current_barcode.assets_target]:
+                    for dir in [current_item.temp_dir, current_item.bulkext_dir, current_item.assets_target]:
                         if os.path.exists(dir):
                             shutil.rmtree(dir)
                     
                     #remove temp files/reports
                     for f in ["duplicates.csv", "errors.csv", "formats.csv", "formatVersions.csv", "mimetypes.csv", "unidentified.csv", "uniqueyears.csv", "years.csv", 'email_domain_histogram.txt', 'find_histogram.txt', 'telephone_histogram.txt', 'report.html']:
-                        report = os.path.join(current_barcode.reports_dir, f)
+                        report = os.path.join(current_item.reports_dir, f)
                         if os.path.exists(report):
                             os.remove(report)
                     
@@ -3400,11 +3393,11 @@ class SdaBatchDeposit(Shipment):
                     if self.separations_status:
                         
                         #set up log file
-                        current_barcode.separations_log = os.path.join(current_barcode.log_dir, 'separations.txt')
+                        current_item.separations_log = os.path.join(current_item.log_dir, 'separations.txt')
                         
                         #get content-to-be-separated from the item barcode
                         with open(self.separations_file, 'r') as f:
-                            sep_list = [file for file in f.read().replace('"', '').replace("'", "").splitlines() if current_barcode.item_barcode in file]
+                            sep_list = [file for file in f.read().replace('"', '').replace("'", "").splitlines() if current_item.identifier in file]
                         
                         #make sure we have separations for this barcode
                         if len(sep_list) > 0:
@@ -3440,50 +3433,50 @@ class SdaBatchDeposit(Shipment):
                             
                             #check to see if we failed to identify any separation targets; if so, fail barcode so we can troublshoot
                             if [f for f in files_to_be_separated if 'FAIL' in f]:
-                                self.write_db('failed', current_barcode.item_barcode,  'separations\t{}'.format(','.join([f for f in files_to_be_separated if 'FAIL' in f])))
+                                self.write_db('failed', current_item.identifier,  'separations\t{}'.format(','.join([f for f in files_to_be_separated if 'FAIL' in f])))
                                 continue
                             #if no failures, move forward with separations
                             else:                                
                                 #separate items and gather stats
-                                status = self.separate_content(current_barcode, files_to_be_separated, shipment_spreadsheet)
+                                status = self.separate_content(current_item, files_to_be_separated, shipment_spreadsheet)
                                 
                                 if not status:
                                     continue
                                 else:
-                                    self.write_db('separations_completed', current_barcode.item_barcode)
+                                    self.write_db('separations_completed', current_item.identifier)
                 
                 '''BAG FOLDER'''
-                if not current_barcode.item_barcode in self.status_db['bagged']:
+                if not current_item.identifier in self.status_db['bagged']:
                 
                     print('\n\tCreating bag for barcode folder...')
                     
                     #set metadata for bag.
-                    current_barcode.current_dict['bag_description'] = 'Source: {}. | Label: {}. | Title: {}. | Appraisal notes: {}. | Date range: {}-{}'.format(current_barcode.current_dict['content_source_type'], current_barcode.current_dict['label_transcription'], current_barcode.current_dict.get('item_title', '-'),  current_barcode.current_dict['appraisal_notes'], current_barcode.current_dict['begin_date'], current_barcode.current_dict['end_date'])
+                    current_item.current_dict['bag_description'] = 'Source: {}. | Label: {}. | Title: {}. | Appraisal notes: {}. | Date range: {}-{}'.format(current_item.current_dict['content_source_type'], current_item.current_dict['label_transcription'], current_item.current_dict.get('item_title', '-'),  current_item.current_dict['appraisal_notes'], current_item.current_dict['begin_date'], current_item.current_dict['end_date'])
                     
                     #make sure we haven't added a temp_dir if we had to restart packaging
-                    if os.path.exists(current_barcode.temp_dir):
-                        shutil.rmtree(current_barcode.temp_dir)
+                    if os.path.exists(current_item.temp_dir):
+                        shutil.rmtree(current_item.temp_dir)
                     
                     try:
                         #create bag
-                        bagit.make_bag(current_barcode.barcode_dir, {"Source-Organization" : current_barcode.unit_name, "External-Description" : current_barcode.current_dict['bag_description'], "External-Identifier" : current_barcode.item_barcode}, checksums=["md5"])
+                        bagit.make_bag(current_item.barcode_dir, {"Source-Organization" : current_item.unit_name, "External-Description" : current_item.current_dict['bag_description'], "External-Identifier" : current_item.identifier}, checksums=["md5"])
                         
                         print('\tBagging complete.')
                         
                         #record completion
-                        self.write_db('bagged', current_barcode.item_barcode)
+                        self.write_db('bagged', current_item.identifier)
                     
                     #continue on to next item if failure
                     except (RuntimeError, PermissionError, bagit.BagError, OSError) as e:
                         print("\tUnexpected error: ", e)
                         
-                        self.write_db('failed', current_barcode.item_barcode, 'bagit\t{}'.format(e))
+                        self.write_db('failed', current_item.identifier, 'bagit\t{}'.format(e))
                         
                         continue
                 
                 '''CREATE TAR'''
                 #make sure file hasn't already been tarred
-                if not current_barcode.item_barcode in self.status_db['tarred']:
+                if not current_item.identifier in self.status_db['tarred']:
                 
                     #Make sure we have enough space to create tar file (just to be sure; we should check first, as a rule)
                     print('\n\tChecking available space...')
@@ -3492,7 +3485,7 @@ class SdaBatchDeposit(Shipment):
                     (total_space, used_space, free_space) = shutil.disk_usage(os.getcwd())
                     
                     #now get size of barcode_dir
-                    cmd = 'du -s {}'.format(current_barcode.barcode_dir)
+                    cmd = 'du -s {}'.format(current_item.barcode_dir)
                     
                     output = subprocess.run(cmd, shell=True, text=True, capture_output=True)
                     
@@ -3505,7 +3498,7 @@ class SdaBatchDeposit(Shipment):
                     if available_space <= 0:
                         print('\n\tWARNING! Insufficient space to create tar archive.\n\t\tAvailable space: %s\n\t\tSize needed for archive: %s' % (free_space, string(dir_size)))
                         
-                        self.write_db('failed', current_barcode.item_barcode, 'Insufficient space\t need minimum of {} bytes'.format(dir_size))
+                        self.write_db('failed', current_item.identifier, 'Insufficient space\t need minimum of {} bytes'.format(dir_size))
                         
                         continue
                     
@@ -3513,70 +3506,70 @@ class SdaBatchDeposit(Shipment):
                         print('\tCheck complete; sufficient space for tar file.')
                         
                     #make sure we haven't added a temp_dir to our bag...
-                    if os.path.exists(current_barcode.temp_dir):
-                        shutil.rmtree(current_barcode.temp_dir)
+                    if os.path.exists(current_item.temp_dir):
+                        shutil.rmtree(current_item.temp_dir)
                         
                     print('\n\tCreating tar archive...')
                     
                     try:
-                        with tarfile.open(current_barcode.tar_file, "w") as tar:
-                            tar.add(current_barcode.barcode_dir, arcname=current_barcode.item_barcode)
+                        with tarfile.open(current_item.tar_file, "w") as tar:
+                            tar.add(current_item.barcode_dir, arcname=current_item.identifier)
                             
                         print('\tTar archive created')
                         
-                        self.write_db('tarred', current_barcode.item_barcode)
+                        self.write_db('tarred', current_item.identifier)
                         
                         
                     except (RuntimeError, PermissionError, IOError, EnvironmentError) as e:
                         
                         print("\tUnexpected error: ", e)
                         
-                        self.write_db('failed', current_barcode.item_barcode, 'tar\t{}'.format(e))
+                        self.write_db('failed', current_item.identifier, 'tar\t{}'.format(e))
                         
                         continue
                 
                 '''MOVE TAR TO ARCHIVER LOCATION'''
-                if not current_barcode.item_barcode in self.status_db['moved']:
+                if not current_item.identifier in self.status_db['moved']:
                 
                     print('\n\tMoving tar file to Archiver folder...')
                     
-                    #get some stats on SIP and store values in current_barcode.current_dict
+                    #get some stats on SIP and store values in current_item.current_dict
                     print('\tGenerating SIP statistics...')
-                    current_barcode.current_dict['sip_extent'] = current_barcode.get_size(current_barcode.tar_file)
+                    current_item.current_dict['sip_extent'] = current_item.get_size(current_item.tar_file)
                     
-                    current_barcode.current_dict['sip_md5'] = current_barcode.md5(current_barcode.tar_file)
+                    current_item.current_dict['sip_md5'] = current_item.md5(current_item.tar_file)
                     
-                    current_barcode.current_dict['sip_filename'] = os.path.basename(current_barcode.tar_file)
+                    current_item.current_dict['sip_filename'] = os.path.basename(current_item.tar_file)
                     
-                    current_barcode.current_dict['sip_creation_date'] = datetime.datetime.fromtimestamp(os.path.getmtime(current_barcode.tar_file)).isoformat()
+                    current_item.current_dict['sip_creation_date'] = datetime.datetime.fromtimestamp(os.path.getmtime(current_item.tar_file)).isoformat()
                     
                     #save current_dict
-                    current_barcode.pickle_dump('current_dict', current_barcode.current_dict)
+                    current_item.pickle_dump('current_dict', current_item.current_dict)
                     
                     try:
-                        shutil.move(current_barcode.tar_file, self.bdpl_archiver_target)
+                        shutil.move(current_item.tar_file, self.bdpl_archiver_target)
                         
                         print('\tTar file moved.')
                         
-                        self.write_db('moved', current_barcode.item_barcode)
+                        self.write_db('moved', current_item.identifier)
                         
                     except (RuntimeError, PermissionError, IOError, EnvironmentError) as e:
                     
                         print("\tUnexpected error: ", e)
                         
-                        self.write_db('failed', current_barcode.item_barcode, 'move\t{}'.format(e))
+                        self.write_db('failed', current_item.identifier, 'move\t{}'.format(e))
                         
                         continue
                 
                 '''WRITE STATS TO MASTER SPREADSHEET'''
-                if not current_barcode.item_barcode in self.status_db['metadata_written']:
+                if not current_item.identifier in self.status_db['metadata_written']:
                     
-                    master_spreadsheet.write_to_spreadsheet(current_barcode.current_dict, master_spreadsheet.item_ws)
+                    master_spreadsheet.write_to_spreadsheet(current_item.current_dict, master_spreadsheet.item_ws)
                     
                     #set up additional shipment stats keys if not already done so
                     if not self.status_db['shipment_stats'].get('sip_count'):
-                        self.status_db['shipment_stats']['unit_name'] = current_barcode.unit_name
-                        self.status_db['shipment_stats']['shipment_date'] = current_barcode.shipment_date
+                        self.status_db['shipment_stats']['unit_name'] = current_item.unit_name
+                        self.status_db['shipment_stats']['shipment_date'] = current_item.shipment_date
                         self.status_db['shipment_stats']['sip_count'] = 0
                         self.status_db['shipment_stats']['extent_raw'] = 0
                         self.status_db['shipment_stats']['item_file_count'] = 0
@@ -3584,46 +3577,46 @@ class SdaBatchDeposit(Shipment):
                     
                     #update statistics & save shelve
                     self.status_db['shipment_stats']['sip_count'] += 1
-                    self.status_db['shipment_stats']['extent_raw'] += current_barcode.current_dict['extent_raw']
-                    self.status_db['shipment_stats']['item_file_count'] += current_barcode.current_dict['item_file_count']
-                    self.status_db['shipment_stats']['sips_extent'] += current_barcode.current_dict['sip_extent']                   
+                    self.status_db['shipment_stats']['extent_raw'] += current_item.current_dict['extent_raw']
+                    self.status_db['shipment_stats']['item_file_count'] += current_item.current_dict['item_file_count']
+                    self.status_db['shipment_stats']['sips_extent'] += current_item.current_dict['sip_extent']                   
                     self.status_db.sync()
                     
                     #record completion
-                    self.write_db('metadata_written', current_barcode.item_barcode)
+                    self.write_db('metadata_written', current_item.identifier)
                 
                 '''CLEAN ORIGINAL BARCODE FOLDER'''
                 #remove original folder
-                if not current_barcode.item_barcode in self.status_db['cleaned']:
+                if not current_item.identifier in self.status_db['cleaned']:
                     print('\n\tRemoving original folder...')
                     
-                    cmd = 'RD /S /Q "{}"'.format(current_barcode.barcode_dir)
+                    cmd = 'RD /S /Q "{}"'.format(current_item.barcode_dir)
                     
                     try:
                         subprocess.check_output(cmd, shell=True)
                         print('\tFolder removed')
-                        self.write_db('cleaned', current_barcode.item_barcode)
+                        self.write_db('cleaned', current_item.identifier)
                         
                     #if unsuccessful, note failure and continue
                     except (PermissionError, subprocess.CalledProcessError, OSError) as e:
                         print("\tUnexpected error: ", e)
-                        self.write_db('failed', current_barcode.item_barcode, 'clean_original\t{}'.format(e))
+                        self.write_db('failed', current_item.identifier, 'clean_original\t{}'.format(e))
                         continue
                         
                 '''BARCODE IS NOW DONE!'''
-                print('\n\t{} COMPLETED\n---------------------------------------------------------------'.format(current_barcode.item_barcode))
+                print('\n\t{} COMPLETED\n---------------------------------------------------------------'.format(current_item.identifier))
                 
                 #if barcode had previously failed, remove it from list.
-                if current_barcode.item_barcode in self.status_db['failed']:
-                    del self.status_db['failed'][current_barcode.item_barcode]
+                if current_item.identifier in self.status_db['failed']:
+                    del self.status_db['failed'][current_item.identifier]
             
             #if other appraisal decision is indicated, note barcode in 'other_action' list
             else:
             
-                print('\n\tAlternate appraisal decision: {}. \n\tConfer with collecting unit as needed.'.format(current_barcode.current_dict['final_appraisal']))
+                print('\n\tAlternate appraisal decision: {}. \n\tConfer with collecting unit as needed.'.format(current_item.current_dict['final_appraisal']))
                 
-                if current_barcode.item_barcode not in self.status_db['other_action']:
-                    self.write_db('other_action', current_barcode.item_barcode, current_barcode.current_dict['final_appraisal'])
+                if current_item.identifier not in self.status_db['other_action']:
+                    self.write_db('other_action', current_item.identifier, current_item.current_dict['final_appraisal'])
                 continue
         
         '''LOOP THROUGH DIRECTORY BARCODES IS NOW COMPLETE; REPORT RESULTS'''        
@@ -3665,7 +3658,7 @@ class SdaBatchDeposit(Shipment):
         #now write format information to master_spreadsheet.  Create new sheet; if it already exists, remove it and rewrite
         print('\nWriting format information...')
         
-        puids = 'puids_{}_{}'.format(current_barcode.unit_name, current_barcode.shipment_date)
+        puids = 'puids_{}_{}'.format(current_item.unit_name, current_item.shipment_date)
     
         #if this puid sheet already exists, we'll just remove it and start anew...
         if puids in master_spreadsheet.wb.sheetnames:
@@ -3722,37 +3715,37 @@ class SdaBatchDeposit(Shipment):
         
         #save master_spreadsheet; add a copy to SDA
         master_spreadsheet.wb.save(master_spreadsheet.spreadsheet)
-        shutil.copy(master_spreadsheet.spreadsheet, self.bdpl_archiver_main_dir)
+        shutil.copy(master_spreadsheet.spreadsheet, self.controller.bdpl_archiver_general_dir)
         
         #copy shipment spreadsheet to 'completed shipments' in archiver_dir and unit_home
-        shutil.copy(shipment_spreadsheet.spreadsheet, self.bdpl_archiver_completed_spreadsheets)
+        shutil.copy(shipment_spreadsheet.spreadsheet, self.controller.bdpl_archiver_completed_spreadsheets)
         shutil.copy(shipment_spreadsheet.spreadsheet, self.completed_shpt_dir)
         
-        print('\nPackaging for shipment {}{} completed!!'.format(current_barcode.unit_name, current_barcode.shipment_date))
+        print('\nPackaging for shipment {}{} completed!!'.format(current_item.unit_name, current_item.shipment_date))
     
-    def write_db(self, db, item_barcode, message=None):
+    def write_db(self, db, identifier, message=None):
     
         if db in self.db_dicts:
-            self.status_db[db][item_barcode] = message
+            self.status_db[db][identifier] = message
         
         elif db in self.db_lists:
-            self.status_db[db].append(item_barcode)
+            self.status_db[db].append(identifier)
             
         self.status_db.sync()
         
-    def separate_content(self, current_barcode, files_to_be_separated, shipment_spreadsheet):
+    def separate_content(self, current_item, files_to_be_separated, shipment_spreadsheet):
         
         #create timestamp for premis
         timestamp = str(datetime.datetime.now())
         event_detail = ''
         
         #open log file
-        outfile = open(current_barcode.separations_log, 'a')
+        outfile = open(current_item.separations_log, 'a')
         
         #if first time through, set up a separations dict for barcode; also write header to log file
-        if not self.status_db['separation-stats'].get(current_barcode.item_barcode):
+        if not self.status_db['separation-stats'].get(current_item.identifier):
             
-            self.status_db['separation-stats'][current_barcode.item_barcode] = {'files' : [], 'sep_file_count' : 0, 'sep_size_tally' : 0, 'sep_disk_image_count' : 0, 'separated_puids' : [], 'failed_items' : []}
+            self.status_db['separation-stats'][current_item.identifier] = {'files' : [], 'sep_file_count' : 0, 'sep_size_tally' : 0, 'sep_disk_image_count' : 0, 'separated_puids' : [], 'failed_items' : []}
             
             outfile.write('{}\t{}\t{}\t{}\n'.format('filename', 'type', 'size', 'last modified date'))
         
@@ -3762,7 +3755,7 @@ class SdaBatchDeposit(Shipment):
         for file in files_to_be_separated:
             
             #check if we've already separated file; if so, continue
-            if file in self.status_db['separation-stats'][current_barcode.item_barcode]['files']:
+            if file in self.status_db['separation-stats'][current_item.identifier]['files']:
                 continue
 
             print('\n\tSeparating: {}'.format(file))
@@ -3786,7 +3779,7 @@ class SdaBatchDeposit(Shipment):
                 else:
                     type = 'extracted-file'
                 
-                    with open(current_barcode.sf_file, 'r', encoding=utf8) as f:
+                    with open(current_item.sf_file, 'r', encoding=utf8) as f:
                         csvreader = csv.reader(f)
                         for row in csvreader:
                             if file in row[0]:
@@ -3802,20 +3795,20 @@ class SdaBatchDeposit(Shipment):
                 
                 #record item in list of completed files; add info to cumulative stats
                 
-                self.status_db['separation-stats'][current_barcode.item_barcode]['files'].append(file)
+                self.status_db['separation-stats'][current_item.identifier]['files'].append(file)
                 
                 if is_file and type == 'extracted-file':
-                    self.status_db['separation-stats'][current_barcode.item_barcode]['sep_file_count'] += 1
+                    self.status_db['separation-stats'][current_item.identifier]['sep_file_count'] += 1
                     
-                    self.status_db['separation-stats'][current_barcode.item_barcode]['sep_size_tally'] += size
+                    self.status_db['separation-stats'][current_item.identifier]['sep_size_tally'] += size
                     
-                    self.status_db['separation-stats'][current_barcode.item_barcode]['separated_puids'].append(puid)
+                    self.status_db['separation-stats'][current_item.identifier]['separated_puids'].append(puid)
                     
                 elif is_file and type == 'disk-image':
-                    self.status_db['separation-stats'][current_barcode.item_barcode]['sep_disk_image_count'] += 1
+                    self.status_db['separation-stats'][current_item.identifier]['sep_disk_image_count'] += 1
                     
                     try:
-                        os.rmdir(current_barcode.image_dir)
+                        os.rmdir(current_item.image_dir)
                     except OSError:
                         pass
                         
@@ -3828,12 +3821,12 @@ class SdaBatchDeposit(Shipment):
             except (shutil.Error, OSError, IOError, PermissionError) as e:
                 result = e
                 success = False    
-                self.status_db['separation-stats'][current_barcode.item_barcode]['failed_items'].append('{}\t{}'.format(file, e))
+                self.status_db['separation-stats'][current_item.identifier]['failed_items'].append('{}\t{}'.format(file, e))
         
         #if any files failed to be moved, fail this item; return and then continue to next barcode
         if not success:
             print('\n\tWARNING: error(s) with separations; moving on to next item...')
-            self.write_db('failed', current_barcode.item_barcode, 'separations\t{}'.format(' | '.join(self.status_db['separation-stats'][current_barcode.item_barcode]['failed_items'])))
+            self.write_db('failed', current_item.identifier, 'separations\t{}'.format(' | '.join(self.status_db['separation-stats'][current_item.identifier]['failed_items'])))
             
             #close log and sync status_db
             outfile.close()
@@ -3844,36 +3837,36 @@ class SdaBatchDeposit(Shipment):
         #otherwise, print results and update barcode stats/shipment spreadsheet
         print('\n\tSeparations completed:')
         
-        if self.status_db['separation-stats'][current_barcode.item_barcode]['sep_file_count'] > 0:
+        if self.status_db['separation-stats'][current_item.identifier]['sep_file_count'] > 0:
             
-            print('\t\t{} files separated ({} bytes)'.format(self.status_db['separation-stats'][current_barcode.item_barcode]['sep_file_count'], self.status_db['separation-stats'][current_barcode.item_barcode]['sep_size_tally']))
+            print('\t\t{} files separated ({} bytes)'.format(self.status_db['separation-stats'][current_item.identifier]['sep_file_count'], self.status_db['separation-stats'][current_item.identifier]['sep_size_tally']))
         
-            event_detail = event_detail + 'removed {} files ({} bytes); '.format(self.status_db['separation-stats'][current_barcode.item_barcode]['sep_file_count'], self.status_db['separation-stats'][current_barcode.item_barcode]['sep_size_tally'])
+            event_detail = event_detail + 'removed {} files ({} bytes); '.format(self.status_db['separation-stats'][current_item.identifier]['sep_file_count'], self.status_db['separation-stats'][current_item.identifier]['sep_size_tally'])
         
-        if self.status_db['separation-stats'][current_barcode.item_barcode]['sep_disk_image_count'] > 0:
+        if self.status_db['separation-stats'][current_item.identifier]['sep_disk_image_count'] > 0:
             
-            print('\t\t{} disk image(s) separated'.format(self.status_db['separation-stats'][current_barcode.item_barcode]['sep_disk_image_count']))
+            print('\t\t{} disk image(s) separated'.format(self.status_db['separation-stats'][current_item.identifier]['sep_disk_image_count']))
             
-            event_detail = event_detail + 'removed {} disk image(s); '.format(self.status_db['separation-stats'][current_barcode.item_barcode]['sep_disk_image_count'])
+            event_detail = event_detail + 'removed {} disk image(s); '.format(self.status_db['separation-stats'][current_item.identifier]['sep_disk_image_count'])
         
         #update our puid count for barcode
-        temp_puid_dict = dict(Counter(self.status_db['separation-stats'][current_barcode.item_barcode]['separated_puids']))
+        temp_puid_dict = dict(Counter(self.status_db['separation-stats'][current_item.identifier]['separated_puids']))
         
         for puid, count in temp_puid_dict.items():
-            self.status_db['format_report'][current_barcode.item_barcode][puid]['count'] -= count
+            self.status_db['format_report'][current_item.identifier][puid]['count'] -= count
                 
         #update shipment spreadsheet: size and file count
         
         #old spreadsheets may not have calculated an extent in bytes; need to catch those outliers (***Can probably remove at some point***)
-        if current_barcode.current_dict['extent_raw'] is None:
-            current_barcode.current_dict['extent_raw'] = current_barcode.get_size(current_barcode.files_dir) 
+        if current_item.current_dict['extent_raw'] is None:
+            current_item.current_dict['extent_raw'] = current_item.get_size(current_item.files_dir) 
         else:
-            current_barcode.current_dict['extent_raw'] -= self.status_db['separation-stats'][current_barcode.item_barcode]['sep_size_tally']
+            current_item.current_dict['extent_raw'] -= self.status_db['separation-stats'][current_item.identifier]['sep_size_tally']
     
-        current_barcode.current_dict['item_file_count'] -= self.status_db['separation-stats'][current_barcode.item_barcode]['sep_file_count']
+        current_item.current_dict['item_file_count'] -= self.status_db['separation-stats'][current_item.identifier]['sep_file_count']
         
         #write info to spreadsheet
-        shipment_spreadsheet.write_to_spreadsheet(current_barcode.current_dict)
+        shipment_spreadsheet.write_to_spreadsheet(current_item.current_dict)
         
         #record premis information
         event_type = 'deaccession'
@@ -3882,10 +3875,10 @@ class SdaBatchDeposit(Shipment):
         event_detail_note = 'Formal removal of an object from the inventory of a repository.'
         agent_id = 'SdaBatchDeposit.separate_content()'
         
-        current_barcode.record_premis(timestamp, event_type, event_outcome, event_detail, event_detail_note, agent_id)
+        current_item.record_premis(timestamp, event_type, event_outcome, event_detail, event_detail_note, agent_id)
         
         #write premis information to file
-        current_barcode.print_premis()
+        current_item.print_premis()
         
         #close log and sync status_db
         outfile.close()

@@ -13,12 +13,14 @@ from lxml import etree
 import math
 import openpyxl
 import os
+import paramiko
 import pickle
 import psutil
 import re
 import shelve
 import shutil
 import sqlite3
+import stat
 import subprocess
 import sys
 import time
@@ -36,7 +38,7 @@ import zipfile
 import Objects
 
 #BDPL files
-from BdplObjects import Unit, Shipment, ItemBarcode, Spreadsheet, MasterSpreadsheet, ManualPremisEvent, RipstationBatch, SdaBatchDeposit
+from BdplObjects import Unit, Shipment, DigitalObject, Spreadsheet, MasterSpreadsheet, ManualPremisEvent, RipstationBatch, SdaBatchDeposit
 
 #set up as controller
 class BdplMainApp(tk.Tk):
@@ -50,7 +52,9 @@ class BdplMainApp(tk.Tk):
         self.bdpl_work_dir = bdpl_work_dir
         self.bdpl_archiver_drive = bdpl_archiver_drive
         self.bdpl_archiver_spool_dir = os.path.join(self.bdpl_archiver_drive, 'Archiver_spool')
-        self.bdpl_resources = os.path.join(bdpl_work_dir, 'bdpl_resources')
+        self.bdpl_archiver_general_dir = os.path.join(self.bdpl_archiver_spool_dir, 'general%2fmediaimages')
+        self.bdpl_archiver_completed_spreadsheets = os.path.join(self.bdpl_archiver_drive, 'spreadsheets', 'completed_shipments')
+        
         self.addresses = 'C:/BDPL/resources/addresses.txt'
         with open(self.addresses, 'r') as f:
             self.ip_addresses = f.read().splitlines()
@@ -62,7 +66,7 @@ class BdplMainApp(tk.Tk):
         #variables entered into BDPL interface
         self.job_type = tk.StringVar()
         self.path_to_content = tk.StringVar()
-        self.item_barcode = tk.StringVar()
+        self.identifier = tk.StringVar()
         self.unit_name = tk.StringVar()
         self.shipment_date = tk.StringVar()
         self.source_device = tk.StringVar()
@@ -101,7 +105,7 @@ class BdplMainApp(tk.Tk):
         self.tabs = {}
 
         #other tabs: bag_prep, bdpl_to_mco, RipstationIngest
-        app_tabs = {BdplIngest : 'BDPL Ingest',  RipstationIngest : 'RipStation Ingest', SdaDeposit : 'Deposit to SDA'}
+        app_tabs = {BdplIngest : 'BDPL Ingest',  RipstationIngest : 'RipStation Ingest', SdaDeposit : 'Deposit to SDA', McoDeposit : 'Deposit to MCO'}
 
         for tab, description in app_tabs.items():
             tab_name = tab.__name__
@@ -159,7 +163,7 @@ class BdplMainApp(tk.Tk):
         #check barcode value, too, if we're using standard BDPL Ingest tab
         if self.get_current_tab() == 'BDPL Ingest':
             
-            if self.item_barcode.get() == '':
+            if self.identifier.get() == '':
                 return (False, '\n\nERROR: please make sure you have entered a barcode value.')
                 
         #if RipStation job, make sure essential info/files are identified
@@ -183,6 +187,11 @@ class BdplMainApp(tk.Tk):
         return (True, 'Unit name and shipment date included.')
     
     def check_connection(self, servername):
+    
+        if self.checked_servers.get('{}_first_time'.format(servername)):
+            self.checked_servers['{}_first_time'.format(servername)] = False
+        else:
+            self.checked_servers['{}_first_time'.format(servername)] = True
         
         if servername == 'bdpl_workspace':
             ip_address = self.ip_addresses[0]
@@ -208,17 +217,18 @@ class BdplMainApp(tk.Tk):
                 break
             
         if not found: 
-            messagebox.showwarning(title='WARNING', message='{} is not mapped to this workstation.\n\nConnect to server via BDPL Ingest Tool window.'.format(ip_address), master=self)
-            self.connect_to_server(servername)
+            if self.checked_servers['{}_first_time'.format(servername)]:
+                self.connect_to_server(servername)
         elif found and mapped_drive != right_drive[0:2]:
             messagebox.showwarning(title='WARNING', message='{} is currently mapped to {} (should be {}).\n\nDisconnect and then reconnect using the BDPL Ingest Tool.'.format(ip_address, mapped_drive, right_drive), master=self)
         else:
             self.checked_servers[servername] = True
+
         
     
     def shipment_status(self):
-        current_spreadsheet = Spreadsheet(self)
-        current_spreadsheet.check_shipment_progress()
+        shipment_spreadsheet = Spreadsheet(self)
+        shipment_spreadsheet.check_shipment_progress()
         
     def media_images(self):
         current_unit = Unit(self)  
@@ -233,27 +243,16 @@ class BdplMainApp(tk.Tk):
 
         #create a manual PREMIS object
         new_premis_event = ManualPremisEvent(self)   
-        
-    def create_frames(self, array, parent):
-    
-        temp_frames_dict = {}
-        
-        for name_, label_ in array:
-            f = tk.LabelFrame(parent, text = label_)
-            f.pack(fill=tk.BOTH, expand=True, pady=5)
-            temp_frames_dict[name_] = f
-        
-        return temp_frames_dict
-        
     
     def update_combobox(self, combobox):
+        
         if self.unit_name.get() == '':
             combobox_list = []
         else:
             unit_home = os.path.join(self.bdpl_work_dir, self.unit_name.get(), 'ingest')
             combobox_list = glob.glob1(unit_home, '*')
         
-        combobox['values'] = combobox_list
+        combobox['values'] = sorted(combobox_list)
         
     def clear_gui(self):        
         
@@ -268,7 +267,7 @@ class BdplMainApp(tk.Tk):
         self.item_description.set('')
         self.appraisal_notes.set('')
         self.bdpl_instructions.set('')
-        self.item_barcode.set('')
+        self.identifier.set('')
         self.path_to_content.set('')
         self.other_device.set('')
         
@@ -296,16 +295,20 @@ class BdplMainApp(tk.Tk):
             self.shipment_date.set('')
             self.separations_file.set('')
             self.separations_status.set(False)
+        
+        elif self.get_current_tab() == 'Deposit to MCO':
+            self.unit_name.set('')
+            self.shipment_date.set('')
     
     def connect_to_server(self, servername):
         ServerConnect(self, servername)
          
-    def check_list(self, list_name, item_barcode):
+    def check_list(self, list_name, identifier):
         if not os.path.exists(list_name):
             return False
         with open(list_name, 'r') as f:
             for item in f:
-                if item_barcode in item.strip():
+                if identifier in item.strip():
                     return True
                 else:
                     continue
@@ -316,7 +319,7 @@ class BdplMainApp(tk.Tk):
             f.write('%s\n' % message)
 
 class ServerConnect(tk.Toplevel):
-    def __init__(self, controller, servername):
+    def __init__(self, controller, servername=None):
         tk.Toplevel.__init__(self, controller)
         self.title('BDPL Ingest: Connect to Server')
         self.iconbitmap(r'C:/BDPL/scripts/favicon.ico')
@@ -328,6 +331,7 @@ class ServerConnect(tk.Toplevel):
         self.drive_letter = tk.StringVar()
         self.username = tk.StringVar()
         self.password = tk.StringVar()
+        self.connection_message = tk.StringVar()
         
         self.controller = controller
             
@@ -343,19 +347,19 @@ class ServerConnect(tk.Toplevel):
         '''
         tab_frames_list = [('message_frame', ''), ('login_frame', 'Login Information:'), ('button_frame', 'Actions:')]
 
-        # self.tab_frames_dict = {}
+        self.tab_frames_dict = {}
 
-        # for name_, label_ in tab_frames_list:
-            # f = tk.LabelFrame(self, text = label_)
-            # f.pack(fill=tk.BOTH, expand=True, pady=5)
-            # self.tab_frames_dict[name_] = f
-            
-        self.tab_frames_dict = self.controller.create_frames(tab_frames_list, self)
+        for name_, label_ in tab_frames_list:
+            f = tk.LabelFrame(self, text = label_)
+            f.pack(fill=tk.BOTH, expand=True, pady=5)
+            self.tab_frames_dict[name_] = f
         
         '''
         MESSAGE
-        '''     
-        ttk.Label(self.tab_frames_dict['message_frame'], text='Log in to {}'.format(self.server.get())).pack(padx=10, pady=10)
+        '''    
+        self.connection_message.set('Log in to {}'.format(self.server.get()))
+        
+        ttk.Label(self.tab_frames_dict['message_frame'], textvariable=self.connection_message).pack(padx=10, pady=10)
         
         '''
         LOGIN FIELDS
@@ -384,21 +388,21 @@ class ServerConnect(tk.Toplevel):
         '''
         BUTTONS
         '''
-        button_id = {}
+        self.button_id = {}
         buttons = ['Connect', 'Cancel']
 
         c=1
         for b in buttons:
             button = tk.Button(self.tab_frames_dict['button_frame'], text=b, bg='light slate gray', width = 10)
             button.grid(row=0, column=c, padx=25, pady=10)
-            button_id[b] = button
+            self.button_id[b] = button
             c+=1
         
         self.tab_frames_dict['button_frame'].grid_columnconfigure(0, weight=1)
         self.tab_frames_dict['button_frame'].grid_columnconfigure(3, weight=1)
         
-        button_id['Connect'].config(command=self.login)
-        button_id['Cancel'].config(command=self.close_top)
+        self.button_id['Connect'].config(command=self.login)
+        self.button_id['Cancel'].config(command=self.close_top)
     
     def display_text(self):
         if self.display_pw.get():
@@ -407,7 +411,7 @@ class ServerConnect(tk.Toplevel):
             self.entries['Password:'].config(show='*')
             
     def login(self):     
-        
+
         cmd = 'NET USE {} {} /user:ads\{} "{}"'.format(self.drive_letter.get(), self.server.get(), self.username.get(), self.password.get())
         
         p = subprocess.run(cmd, shell=True, text=True, capture_output=True)
@@ -422,11 +426,84 @@ class ServerConnect(tk.Toplevel):
                 self.controller.tabs['SdaDeposit'].archiver_combobox.current(targets.index('general%2fmediaimages'))
                 
         else:
-            messagebox.showerror(title='ERROR', message='Failed to connect to {}:\n\n{}'.format(self.server.get(), p.stderr), master=self)            
+            messagebox.showerror(title='ERROR', message='Failed to connect to {}:\n\n{}'.format(self.server.get(), p.stderr), master=self)   
     
     def close_top(self):
+        
         #close window
         self.destroy() 
+
+class McoConnect(ServerConnect):
+    def __init__(self, controller, mco_server, parent):
+        ServerConnect.__init__(self, controller)
+        self.parent = parent
+        
+        #add unique features for McoConnect
+        self.server.set(mco_server)
+        self.connection_message.set('Log in to {}'.format(self.server.get()))
+        self.button_id['Connect'].config(command=self.get_credentials)
+        
+    def get_credentials(self):
+        #return username and password so these can be used by McoSftpClient
+        self.parent.username = self.username.get()
+        self.parent.password = self.password.get()
+        
+        #close TopLevel once info has been assigned to parent
+        self.destroy()
+        
+class McoSftpClient:
+    def __init__(self, controller, username, password, mco_server, mco_dir):
+        self.controller = controller
+        self.host = mco_server 
+        self.username = username
+        self.password = password
+        self.port = 22
+        self.mco_dir = mco_dir  
+    
+    def create_client(self):     
+        try:
+            self.transport = paramiko.Transport((self.host, self.port))
+        except socket.gaierror as e:
+            print('\n\nWARNING: unable to connect to MCO dropbox ({}).'.format(e))
+            return
+        
+        try:
+            self.transport.connect(None, self.username, self.password)
+        except paramiko.ssh_exception.AuthenticationException as e:
+            print('\n\nWARNING: Authentication issue.  Check username / password and try again.')
+            return
+            
+        self.sftp = paramiko.SFTPClient.from_transport(self.transport)
+    
+    def get_collection_list(self):
+        ls = [fileattr.filename for fileattr in self.sftp.listdir_attr(self.mco_dir) if stat.S_ISDIR(fileattr.st_mode)]
+        
+        return sorted(ls)
+        
+    def make_dirs(self, asset_path):
+        dirs_ = []
+        while len(asset_path) > 1:
+            dirs_.append(asset_path)
+            asset_path, _  = os.path.split(asset_path)
+        if len(asset_path) == 1 and not asset_path.startswith("/"): 
+            dirs_.append(asset_path)
+        while len(dirs_):
+            asset_path = dirs_.pop()
+            try:
+                self.sftp.stat(asset_path)
+            except:
+                self.sftp.mkdir(asset_path)   
+    
+    def close_client(self):
+        try:
+            if self.sftp:
+                self.sftp.close()
+            if self.transport:
+                self.transport.close()
+        except NameError:
+            print('\n\nError; SFTP client not created.')
+            return
+    
 
 class BdplIngest(tk.Frame):
     def __init__(self, parent, controller):
@@ -455,7 +532,7 @@ class BdplIngest(tk.Frame):
         '''
         BATCH INFORMATION FRAME: includes entry fields to capture barcode, unit, and shipment date
         '''
-        entry_fields = [('Item barcode:', 20, self.controller.item_barcode), ('Unit:', 5, self.controller.unit_name), ('Shipment date:', 10, self.controller.shipment_date)]
+        entry_fields = [('Item barcode:', 20, self.controller.identifier), ('Unit:', 5, self.controller.unit_name), ('Shipment date:', 10, self.controller.shipment_date)]
 
         for label_, width_, var_ in entry_fields:
             if label_ == 'Shipment date:':
@@ -602,15 +679,15 @@ class BdplIngest(tk.Frame):
             return
 
         #create a barcode object and a spreadsheet object
-        current_barcode = ItemBarcode(self.controller)
+        current_item = DigitalObject(self.controller)
         
-        status, msg = current_barcode.prep_barcode()
+        status, msg = current_item.prep_barcode()
         if not status:
             print(msg)
             return
             
         #check status
-        current_barcode.check_barcode_status()
+        current_item.check_barcode_status()
         
         print('\n\nRecord loaded successfully; ready for next operation.')
     
@@ -619,31 +696,31 @@ class BdplIngest(tk.Frame):
         print('\n\nSTEP 1. TRANSFER CONTENT')
 
         #create a barcode object and job object
-        current_barcode = ItemBarcode(self.controller)
+        current_item = DigitalObject(self.controller)
 
         #make sure transfer details have been correctly entered
-        status, msg = current_barcode.verify_transfer_details()
+        status, msg = current_item.verify_transfer_details()
         if not status:
             print(msg)
             return
         
-        current_barcode.run_item_transfer()
+        current_item.run_item_transfer()
     
     def launch_analysis(self):
         
         print('\n\nSTEP 2. CONTENT ANALYSIS')
         
         #create a barcode object
-        current_barcode = ItemBarcode(self.controller)
+        current_item = DigitalObject(self.controller)
         
         #make sure transfer details have been correctly entered
-        status, msg = current_barcode.verify_analysis_details()
+        status, msg = current_item.verify_analysis_details()
         if not status:
             print(msg)
             return
             
         #run analysis on item
-        current_barcode.run_item_analysis()
+        current_item.run_item_analysis()
     
     def write_technician_note(self):
         
@@ -654,30 +731,30 @@ class BdplIngest(tk.Frame):
             return
         
         #create a barcode object and a spreadsheet object
-        current_barcode = ItemBarcode(self.controller)
+        current_item = DigitalObject(self.controller)
 
-        current_barcode.metadata_dict['technician_note'] = self.controller.tabs['BdplIngest'].bdpl_technician_note.get(1.0, tk.END)
+        current_item.metadata_dict['technician_note'] = self.controller.tabs['BdplIngest'].bdpl_technician_note.get(1.0, tk.END)
         
         #additional steps if we are noting failed transfer of item...
         if self.controller.bdpl_failure_notification.get():
-            current_barcode.metadata_dict['migration_date'] = str(datetime.datetime.now())
-            current_barcode.metadata_dict['migration_outcome'] = "Failure"
+            current_item.metadata_dict['migration_date'] = str(datetime.datetime.now())
+            current_item.metadata_dict['migration_outcome'] = "Failure"
             
-            done_file = os.path.join(current_barcode.temp_dir, 'done.txt')
+            done_file = os.path.join(current_item.temp_dir, 'done.txt')
             if not os.path.exists(done_file):
                 open(done_file, 'a').close()
         
         #save our metadata, just in case...
-        current_barcode.pickle_dump('metadata_dict', current_barcode.metadata_dict)
+        current_item.pickle_dump('metadata_dict', current_item.metadata_dict)
         
         #write info to spreadsheet.  Create a spreadsheet object, make sure spreadsheet isn't already open, and if OK, proceed to open and write info.
-        current_spreadsheet = Spreadsheet(self.controller)
-        if current_spreadsheet.already_open():
-            print('\n\nWARNING: {} is currently open.  Close file before continuing and/or contact digital preservation librarian if other users are involved.'.format(current_spreadsheet.spreadsheet))
+        shipment_spreadsheet = Spreadsheet(self.controller)
+        if shipment_spreadsheet.already_open():
+            print('\n\nWARNING: {} is currently open.  Close file before continuing and/or contact digital preservation librarian if other users are involved.'.format(shipment_spreadsheet.spreadsheet))
             return
             
-        current_spreadsheet.open_wb()
-        current_spreadsheet.write_to_spreadsheet(current_barcode.metadata_dict)
+        shipment_spreadsheet.open_wb()
+        shipment_spreadsheet.write_to_spreadsheet(current_item.metadata_dict)
         
         print('\n\nInformation saved to Appraisal worksheet.') 
   
@@ -929,8 +1006,154 @@ class SdaDeposit(tk.Frame):
             return
             
         current_sda_batch.deposit_barcodes_to_sda(master_spreadsheet, shipment_spreadsheet)
-      
 
+class McoDeposit(tk.Frame):
+    def __init__(self, parent, controller):
+
+        #create main frame in notebook
+        tk.Frame.__init__(self, parent)
+        self.config(height=300)
+        self.pack(fill=tk.BOTH, expand=True)
+
+        self.parent = parent
+        self.controller = controller
+        self.mco_server = self.controller.ip_addresses[2]
+        self.mco_dir = self.controller.ip_addresses[3]
+        
+        self.connected_msg = tk.StringVar()
+        self.mco_collection_name = tk.StringVar()
+
+        '''
+        CREATE FRAMES
+        '''
+        tab_frames_list = [('connect_frame', 'Connect to MCO Dropbox'), ('batch_info_frame', 'Basic Information:'), ('collection_frame', 'Select MCO Collection:'), ('button_frame', 'MCO Deposit Actions:')]
+
+        self.tab_frames_dict = {}
+
+        for name_, label_ in tab_frames_list:
+            f = tk.LabelFrame(self, text = label_)
+            f.pack(fill=tk.BOTH, expand=True, pady=5)
+            self.tab_frames_dict[name_] = f
+        
+        '''
+        CONNECT TO MCO DROPBOX FRAME
+        '''     
+        self.connected_msg.set('Ingest Tool is NOT connected to {}'.format(self.controller.ip_addresses[2]))
+        
+        self.connect_label = ttk.Label(self.tab_frames_dict['connect_frame'], textvariable=self.connected_msg)
+        self.connect_label.grid(row=0, column=1, columnspan=2, padx=20, pady=10)
+        
+        self.connect_buttons = {}
+        
+        c=1
+        for label_ in ['Connect', 'Disconnect']:
+            b = tk.Button(self.tab_frames_dict['connect_frame'], text=label_, width=15, bg='light slate gray')
+            b.grid(row=1, column=c, padx=20, pady=10)
+            self.connect_buttons[label_] = b
+            c += 1
+        
+        self.connect_buttons['Connect'].config(command=self.connect_to_mco)
+        self.connect_buttons['Disconnect'].config(command=self.disconnect_mco_dropbox)
+                
+        self.tab_frames_dict['connect_frame'].grid_columnconfigure(0, weight=1)
+        self.tab_frames_dict['connect_frame'].grid_columnconfigure(3, weight=1)
+        
+        '''
+        BATCH INFORMATION FRAME: includes entry fields to capture unit and shipment date
+        '''
+        
+        ttk.Label(self.tab_frames_dict['batch_info_frame'], text='Unit:').pack(padx=(20,0), pady=10, side=tk.LEFT)
+        e = ttk.Entry(self.tab_frames_dict['batch_info_frame'], width=5, textvariable=self.controller.unit_name)
+        e.pack(padx=10, pady=10, side=tk.LEFT)
+        
+        ttk.Label(self.tab_frames_dict['batch_info_frame'], text='Shipment date:').pack(padx=(20,0), pady=10, side=tk.LEFT)
+        
+        self.date_combobox = ttk.Combobox(self.tab_frames_dict['batch_info_frame'], width=20, textvariable=self.controller.shipment_date, postcommand = lambda: self.controller.update_combobox(self.date_combobox))
+        
+        self.date_combobox.pack(padx=10, pady=10, side=tk.LEFT)
+        
+        '''
+        MCO COLLECTION FRAME
+        '''
+        
+        self.mco_collection_name.set('')
+        self.mco_combobox = ttk.Combobox(self.tab_frames_dict['collection_frame'], width=90, textvariable=self.mco_collection_name, state= 'readonly')
+        self.mco_combobox.pack(padx=10, pady=10)
+        
+        '''
+        BUTTON FRAME
+        '''
+        button_id = {}
+        
+        c=1
+        for label_ in ['New', 'Prep Deposit', 'Move to MCO', 'Quit']:
+            b = tk.Button(self.tab_frames_dict['button_frame'], text=label_, width=15, bg='light slate gray')
+            b.grid(row=0, column=c, padx=20, pady=10)
+            button_id[label_] = b
+            c+=1
+        
+        self.tab_frames_dict['button_frame'].grid_columnconfigure(0, weight=1)
+        self.tab_frames_dict['button_frame'].grid_columnconfigure(5, weight=1)
+        
+        button_id['New'].config(command = self.controller.clear_gui)
+        button_id['Prep Deposit'].config(command=self.prep_mco_deposit)
+        button_id['Move to MCO'].config(command=self.move_to_mco_dropbox)
+        button_id['Quit'].config(command = lambda: close_app(self.controller))
+    
+    def connect_to_mco(self):
+        #create TopLevel to get username/password
+        make_connection = McoConnect(self.controller, self.mco_server, self)
+        
+        #wait until TopLevel is closed before proceeding
+        self.wait_window(make_connection)
+        
+        print(self.username, self.password)
+        
+        #create client object
+        self.mco_client = McoSftpClient(self.controller, self.username, self.password, self.mco_server, self.mco_dir)
+        
+        #then create sftp client
+        self.mco_client.create_client()
+        
+        #make sure client created
+        try:
+            self.mco_client.sftp.stat('.')
+        except AttributeError:
+            return
+        
+        #update frame to confirm connection
+        self.connected_msg.set('Connected to {}'.format(self.mco_server))
+        
+        #add values to MCO collection combobox
+        self.mco_combobox['values'] = self.mco_client.get_collection_list()
+            
+    def disconnect_mco_dropbox(self):
+        try: 
+            #close sftp client/transport
+            self.mco_client.sftp.close()
+            self.mco_client.transport.close()
+            
+            #update interface
+            self.connected_msg.set('Ingest Tool is NOT connected to {}'.format(self.mco_server))
+            
+        except (NameError, AttributeError):
+            pass
+    
+    def prep_mco_deposit(self):
+        pass
+        
+    def move_to_mco_dropbox(self):
+        
+        if self.mco_collection_name.get() == '':
+            
+            messagebox.showwarning(title='WARNING', message='Select MCO collection from dropdown menu before continuing.', master=self)
+            
+            return
+        
+        self.mco_destination = '{}/{}'.format(self.mco_dir, self.mco_collection_name.get())
+        
+        print(self.mco_destination)
+    
 def close_app(window):
     window.destroy()
     sys.exit(0)
