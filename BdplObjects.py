@@ -217,7 +217,7 @@ class DigitalObject(Shipment):
             return (False, '\n\nWARNING: barcode was not found in spreadsheet.  Make sure value is entered correctly and/or check spreadsheet for value.  Consult with digital preservation librarian as needed.')
         
         #load metadata into item object
-        self.load_item_metadata(shipment_spreadsheet, row)
+        self.load_item_metadata(shipment_spreadsheet)
         
         #assign variables to GUI
         if self.controller.get_current_tab() == 'BDPL Ingest':
@@ -2457,12 +2457,14 @@ class DigitalObject(Shipment):
 class Spreadsheet(Shipment):
     def __init__(self, controller):
         Shipment.__init__(self, controller)
-        
         self.controller = controller        
-        self.identifier = self.controller.identifier.get()
     
     def open_wb(self):
-        self.wb = openpyxl.load_workbook(self.spreadsheet)
+        
+        if not os.path.exists(self.spreadsheet):
+            self.wb = openpyxl.Workbook()
+        else:
+            self.wb = openpyxl.load_workbook(self.spreadsheet)
             
         if self.__class__.__name__ == 'MasterSpreadsheet':
             item_ws = self.wb['Item']
@@ -2472,7 +2474,16 @@ class Spreadsheet(Shipment):
             self.inv_ws = self.wb['Inventory']
             self.app_ws = self.wb['Appraisal']
             self.info_ws = self.wb['Basic_Transfer_Information']
+            
+        elif self.__class__.__name__ == 'McoSpreadsheet':
+            self.mco_ws = self.wb.active
     
+    def get_unit_liaison(self):
+        
+        for row in self.info_ws['A']:
+            if 'Email:' in row.value:
+                return self.info_ws.cell(row=row.row, column=2).value
+                
     def already_open(self):
         temp_file = os.path.join(os.path.dirname(self.spreadsheet), '~${}'.format(os.path.basename(self.spreadsheet)))
         if os.path.isfile(temp_file):
@@ -2484,6 +2495,7 @@ class Spreadsheet(Shipment):
         #set initial Boolean value to false; change to True if barcode is found
         found = False
         row = self.app_ws.max_row+1
+        self.identifier = self.controller.identifier.get()
         
         if ws.title in ['Inventory', 'Appraisal', 'Item']:
             #if barcode exists in spreadsheet, set variable to that row
@@ -2686,6 +2698,38 @@ class MasterSpreadsheet(Spreadsheet):
         else:
             return (True, "Let's roll!")
         
+class McoSpreadsheet(Spreadsheet):
+    def __init__(self, controller, mco_batch):
+        Spreadsheet.__init__(self, controller)
+        self.controller = controller
+        self.parent = mco_batch
+        
+        self.spreadsheet = os.path.join(self.parent.mco_report_dir, '{}_{}_MCO_deposit_batch_{}.xlsx'.format(self.unit_name, self.shipment_date, str(self.parent.current_batch).zfill(2)))
+        
+        #open spreadsheet
+        self.open_wb()
+
+    def set_up_manifest(self):
+        
+        deposit_date = datetime.datetime.today().strftime('%Y-%m-%d')
+        
+        #get the unit liaison for the shipment
+        if not self.parent.status_db.get('unit_liaison'):
+            self.parent.status_db['unit_liaison'] = self.parent.shipment_spreadsheet.get_unit_liaison()
+        
+        #set up headers
+        description = 'BDPL deposit to MCO: {} shipment {}, batch {} ({})'.format(self.unit_name, self.shipment_date, str(self.parent.current_batch).zfill(2), deposit_date)
+        contact_info = self.parent.status_db.get('unit_liaison', 'micshall@iu.edu')
+        
+        reference_info = [description, contact_info]
+        self.mco_ws.append(reference_info)
+        
+        mco_header = ['Other Identifier', 'Other Identifier Type', 'Other Identifier', 'Other Identifier Type', 'Other Identifier', 'Other Identifier Type', 'Title', 'Creator', 'Date Issued', 'Abstract', 'Physical Description', 'Publish', 'File', 'Label']
+        self.mco_ws.append(mco_header)
+        
+        self.wb.save(self.spreadsheet)
+        
+
 class ManualPremisEvent(tk.Toplevel):
     def __init__(self, controller):
         tk.Toplevel.__init__(self, controller)
@@ -3151,6 +3195,10 @@ class SdaBatchDeposit(Shipment):
         self.unaccounted_dir = os.path.join(self.ship_dir, 'unaccounted') 
         self.deposit_dirs = [self.bag_report_dir, self.deaccession_dir, self.unaccounted_dir]
         
+        #set up spreadsheets
+        self.master_spreadsheet = MasterSpreadsheet(self.controller)
+        self.shipment_spreadsheet = Spreadsheet(self.controller)
+        
         #set up shelve to track status
         self.sda_status = os.path.join(self.bag_report_dir, 'sda_status')
         self.status_db = shelve.open(self.sda_status, writeback=True)
@@ -3189,7 +3237,7 @@ class SdaBatchDeposit(Shipment):
             for dc in self.db_dicts:
                 self.status_db[dc] = {}         
         
-    def prep_sda_batch(self, master_spreadsheet, shipment_spreadsheet):
+    def prep_sda_batch(self):
         '''
         Check variables and spreadsheets
         '''
@@ -3199,28 +3247,28 @@ class SdaBatchDeposit(Shipment):
             return (status, msg)
         
         #verify master spreadsheet
-        status, msg = master_spreadsheet.verify_master_spreadsheet()
+        status, msg = self.master_spreadsheet.verify_self.master_spreadsheet()
         if not status:
             return (status, msg)
                 
         #make sure master spreadsheet is not open
-        if master_spreadsheet.already_open():
-            return (False, '\n\nWARNING: {} is currently open.  Close file before continuing and/or contact digital preservation librarian if other users are involved.'.format(master_spreadsheet.spreadsheet))
+        if self.master_spreadsheet.already_open():
+            return (False, '\n\nWARNING: {} is currently open.  Close file before continuing and/or contact digital preservation librarian if other users are involved.'.format(self.master_spreadsheet.spreadsheet))
             
-        #open master_spreadsheet; get worksheets
-        master_spreadsheet.open_wb()
+        #open self.master_spreadsheet; get worksheets
+        self.master_spreadsheet.open_wb()
         
         #verify shipment spreadsheet
-        status, msg = shipment_spreadsheet.verify_spreadsheet()
+        status, msg = self.shipment_spreadsheet.verify_spreadsheet()
         if not status:
             return (status, msg)
                 
         #make sure shipment spreadsheet is not open
-        if shipment_spreadsheet.already_open():
-            return (False, '\n\nWARNING: {} is currently open.  Close file before continuing and/or contact digital preservation librarian if other users are involved.'.format(shipment_spreadsheet.spreadsheet))
+        if self.shipment_spreadsheet.already_open():
+            return (False, '\n\nWARNING: {} is currently open.  Close file before continuing and/or contact digital preservation librarian if other users are involved.'.format(self.shipment_spreadsheet.spreadsheet))
         
-        #open shipment_spreadsheet; get worksheets
-        shipment_spreadsheet.open_wb()
+        #open self.shipment_spreadsheet; get worksheets
+        self.shipment_spreadsheet.open_wb()
         
         #make deposit folders
         for dir in self.deposit_dirs:
@@ -3234,10 +3282,10 @@ class SdaBatchDeposit(Shipment):
         os.chdir(self.ship_dir)
         
         #barcodes in ship_dir
-        self.status_db['directory_barcodes'] = [d for d in os.listdir(self.ship_dir) if os.path.isdir(d) and not d in ['review', 'bag_reports', 'unaccounted', 'deaccessioned', 'ripstation_reports', 'mco_prep', 'reports']] #including legacy directory names; at some point, we will need to simplify this list
+        self.status_db['directory_barcodes'] = [d for d in os.listdir(self.ship_dir) if os.path.isdir(d) and not d in ['review', 'bag_reports', 'unaccounted', 'deaccessioned', 'ripstation_reports', 'mco_reports', 'reports']] #including legacy directory names; at some point, we will need to simplify this list
         
         #barcodes in shipment spreadsheet
-        for barcode in shipment_spreadsheet.app_ws['A'][1:]:
+        for barcode in self.shipment_spreadsheet.app_ws['A'][1:]:
             if not barcode.value is None and not str(barcode.value) in self.status_db['spreadsheet_barcodes']:
                 self.status_db['spreadsheet_barcodes'].append(str(barcode.value))
         
@@ -3293,11 +3341,11 @@ class SdaBatchDeposit(Shipment):
         self.status_db.sync()
         
         #get columns for current appraisal spreadsheet
-        self.appraisal_ws_columns = shipment_spreadsheet.get_spreadsheet_columns(shipment_spreadsheet.app_ws)
+        self.appraisal_ws_columns = self.shipment_spreadsheet.get_spreadsheet_columns(self.shipment_spreadsheet.app_ws)
         
         return (True, 'Ready to deposit!')
     
-    def deposit_barcodes_to_sda(self, master_spreadsheet, shipment_spreadsheet):
+    def deposit_barcodes_to_sda(self):
         
         for item in self.status_db['directory_barcodes']:
 
@@ -3313,7 +3361,7 @@ class SdaBatchDeposit(Shipment):
                 continue            
             
             #load metadata
-            current_item.load_item_metadata(shipment_spreadsheet)
+            current_item.load_item_metadata(self.shipment_spreadsheet)
             
             #record status
             if not current_item.identifier in self.status_db['started']:
@@ -3438,7 +3486,7 @@ class SdaBatchDeposit(Shipment):
                             #if no failures, move forward with separations
                             else:                                
                                 #separate items and gather stats
-                                status = self.separate_content(current_item, files_to_be_separated, shipment_spreadsheet)
+                                status = self.separate_content(current_item, files_to_be_separated, self.shipment_spreadsheet)
                                 
                                 if not status:
                                     continue
@@ -3564,7 +3612,7 @@ class SdaBatchDeposit(Shipment):
                 '''WRITE STATS TO MASTER SPREADSHEET'''
                 if not current_item.identifier in self.status_db['metadata_written']:
                     
-                    master_spreadsheet.write_to_spreadsheet(current_item.current_dict, master_spreadsheet.item_ws)
+                    self.master_spreadsheet.write_to_spreadsheet(current_item.current_dict, self.master_spreadsheet.item_ws)
                     
                     #set up additional shipment stats keys if not already done so
                     if not self.status_db['shipment_stats'].get('sip_count'):
@@ -3652,19 +3700,19 @@ class SdaBatchDeposit(Shipment):
         
         print('\nWriting shipment stats...')
         
-        #write shipment stats to master_spreadsheet
-        master_spreadsheet.write_to_spreadsheet(self.status_db['shipment_stats'], master_spreadsheet.cumulative_ws)
+        #write shipment stats to self.master_spreadsheet
+        self.master_spreadsheet.write_to_spreadsheet(self.status_db['shipment_stats'], self.master_spreadsheet.cumulative_ws)
         
-        #now write format information to master_spreadsheet.  Create new sheet; if it already exists, remove it and rewrite
+        #now write format information to self.master_spreadsheet.  Create new sheet; if it already exists, remove it and rewrite
         print('\nWriting format information...')
         
         puids = 'puids_{}_{}'.format(current_item.unit_name, current_item.shipment_date)
     
         #if this puid sheet already exists, we'll just remove it and start anew...
-        if puids in master_spreadsheet.wb.sheetnames:
-            master_spreadsheet.wb.remove(master_spreadsheet.wb[puids])
+        if puids in self.master_spreadsheet.wb.sheetnames:
+            self.master_spreadsheet.wb.remove(self.master_spreadsheet.wb[puids])
         
-        master_spreadsheet.puid_ws = master_spreadsheet.wb.create_sheet(puids)
+        self.master_spreadsheet.puid_ws = self.master_spreadsheet.wb.create_sheet(puids)
         
         #set up a header
         puid_header = []
@@ -3680,7 +3728,7 @@ class SdaBatchDeposit(Shipment):
         puid_header.insert(0, 'barcode')
         
         #append header to puid sheet
-        master_spreadsheet.puid_ws.append(puid_header)
+        self.master_spreadsheet.puid_ws.append(puid_header)
         
         #create a dictionary to use to refer to puid columns in the sheet.  Add 1 to index, as 1st column is 1 (not 0) in openpyxl
         puid_cols = {}
@@ -3689,37 +3737,40 @@ class SdaBatchDeposit(Shipment):
         #now loop through all barcodes
         for barcode in self.status_db['format_report']:
             #get a new row for each barcode; write in barcode value
-            row = master_spreadsheet.puid_ws.max_row+1
+            row = self.master_spreadsheet.puid_ws.max_row+1
             
-            master_spreadsheet.puid_ws.cell(row=row, column=puid_cols['barcode'], value=barcode)
+            self.master_spreadsheet.puid_ws.cell(row=row, column=puid_cols['barcode'], value=barcode)
             
             #loop through the puids of each barcode; write count to spreadsheet
             for puid in self.status_db['format_report'][barcode]:
                 if self.status_db['format_report'][barcode][puid]['count'] < 1:
                     continue   
-                master_spreadsheet.puid_ws.cell(row=row, column=puid_dict[puid], value=self.status_db['format_report'][barcode][puid]['count'])
+                self.master_spreadsheet.puid_ws.cell(row=row, column=puid_dict[puid], value=self.status_db['format_report'][barcode][puid]['count'])
                 
         #Finally, tally the total # of each PUID in the shipment
-        row = master_spreadsheet.puid_ws.max_row+1
-        master_spreadsheet.puid_ws.cell(row=row, column=1, value='Totals:')
+        row = self.master_spreadsheet.puid_ws.max_row+1
+        self.master_spreadsheet.puid_ws.cell(row=row, column=1, value='Totals:')
         
         #loop through sheet and sum each column
         #Parameters for iter_cols: min_col=None, max_col=None, min_row=None, max_row=None
-        for col in fws.iter_cols(2, master_spreadsheet.puid_ws.max_column, 2, master_spreadsheet.puid_ws.max_row):
+        for col in fws.iter_cols(2, self.master_spreadsheet.puid_ws.max_column, 2, self.master_spreadsheet.puid_ws.max_row):
             count = 0
             for c in col:
                 if not c.value is None:
                     count += c.value
                     colno = c.column
-            master_spreadsheet.puid_ws.cell(row=row, column=colno, value=count)
+            self.master_spreadsheet.puid_ws.cell(row=row, column=colno, value=count)
         
-        #save master_spreadsheet; add a copy to SDA
-        master_spreadsheet.wb.save(master_spreadsheet.spreadsheet)
-        shutil.copy(master_spreadsheet.spreadsheet, self.controller.bdpl_archiver_general_dir)
+        #save self.master_spreadsheet; add a copy to SDA
+        self.master_spreadsheet.wb.save(self.master_spreadsheet.spreadsheet)
+        shutil.copy(self.master_spreadsheet.spreadsheet, self.controller.bdpl_archiver_general_dir)
         
         #copy shipment spreadsheet to 'completed shipments' in archiver_dir and unit_home
-        shutil.copy(shipment_spreadsheet.spreadsheet, self.controller.bdpl_archiver_completed_spreadsheets)
-        shutil.copy(shipment_spreadsheet.spreadsheet, self.completed_shpt_dir)
+        shutil.copy(self.shipment_spreadsheet.spreadsheet, self.controller.bdpl_archiver_completed_spreadsheets)
+        shutil.copy(self.shipment_spreadsheet.spreadsheet, self.completed_shpt_dir)
+        
+        #close shelve
+        self.status_db.close()
         
         print('\nPackaging for shipment {}{} completed!!'.format(current_item.unit_name, current_item.shipment_date))
     
@@ -3733,7 +3784,7 @@ class SdaBatchDeposit(Shipment):
             
         self.status_db.sync()
         
-    def separate_content(self, current_item, files_to_be_separated, shipment_spreadsheet):
+    def separate_content(self, current_item, files_to_be_separated):
         
         #create timestamp for premis
         timestamp = str(datetime.datetime.now())
@@ -3866,7 +3917,7 @@ class SdaBatchDeposit(Shipment):
         current_item.current_dict['item_file_count'] -= self.status_db['separation-stats'][current_item.identifier]['sep_file_count']
         
         #write info to spreadsheet
-        shipment_spreadsheet.write_to_spreadsheet(current_item.current_dict)
+        self.shipment_spreadsheet.write_to_spreadsheet(current_item.current_dict)
         
         #record premis information
         event_type = 'deaccession'
@@ -3902,3 +3953,228 @@ class SdaBatchDeposit(Shipment):
         """ Sort the given list in the way that humans expect.  This and associated functions provided by https://nedbatchelder.com/blog/200712/human_sorting.html
         """
         l.sort(key=alphanum_key)
+
+class McoBatchDeposit(Shipment):
+    def __init__(self, controller, mco_client=None):
+        Shipment.__init__(self, controller)
+        self.controller = controller
+        
+        #set # of items that will be included per batch. 
+        self.batch_size = 50
+        
+        #set up temp folder and shelve
+        self.mco_report_dir = os.path.join(self.ship_dir, 'mco_reports')
+        if not os.path.exists(self.mco_report_dir):
+            os.mkdir(self.mco_report_dir)
+        
+        #set up shelve to track status
+        self.mco_status = os.path.join(self.mco_report_dir, 'mco_status')
+        self.status_db = shelve.open(self.mco_status, writeback=True)
+        
+        #check for key objects in the shelve; create if they don't exist
+        if not self.status_db.get('formats'):
+            self.status_db['formats'] = ['.wav', '.mkv', '.mpg']
+
+        #get a shipment spreadsheet
+        self.shipment_spreadsheet = Spreadsheet(self.controller)
+        self.shipment_spreadsheet.open_wb()
+        
+        self.status_db.sync()
+
+    def prep_batches_for_mco(self):
+        
+        #if batch_info dict doesn't exist, set it up 
+        if not self.status_db.get('batch_info'):
+            self.status_db['batch_info'] = {}
+            self.current_batch = 0
+            #since this is the first time through, set up new_batch resources
+            self.new_batch()
+            
+        else:
+            self.current_batch = len(self.status_db['batch_info'])            
+            self.current_item_count = len(self.status_db['batch_info'][self.current_batch])
+        
+            #manifest and other items should have already been set up; call it up
+            self.current_manifest = McoSpreadsheet(self.controller, self)
+            
+        if not self.status_db.get('master_list'):
+            self.status_db['master_list'] = []
+        
+        for barcode in self.shipment_spreadsheet.app_ws['A'][1:]:
+            if barcode is None:
+                continue
+            
+            #if the most recent batch reached batch_size limit, start a new batch
+            if self.current_item_count == self.batch_size:
+                self.new_batch()
+            
+            #set identifier variable
+            self.controller.identifier.identifier.set(barcode.strip())
+            
+            #set up DigitalObject
+            current_item = DigitalObject(self.controller)
+            
+            #skip if we've already completed item 
+            if current_item.identifier in self.status_db['master_list']:
+                continue
+            
+            #skip if barcode_dir doesn't exist
+            if not os.path.exists(current_item.barcode_dir):
+                continue
+            
+            print('\n\nCURRENT ITEM: {}'.format(current_item.identifier)
+            
+            #load metadata if we've made it this far...
+            current_item.load_item_metadata(self.shipment_spreadsheet)
+            
+            if not 'mco' in current_item.current_dict['final_appraisal']:
+                print('\n\tDo not deposit to MCO')
+                continue
+            
+        
+    def new_batch(self):
+        #reset variables
+        self.current_item_count = 0
+        self.current_batch += 1
+        
+        #set up batch_info
+        self.status_db['batch_info'][self.current_batch] = []
+        
+        #set up list to track files
+        self.status_db['copy_list-batch_{}'.format(str(self.current_batch).zfill(2))] =[]
+        
+        #set up new manifest
+        self.current_manifest = McoSpreadsheet(self.controller, self)
+        self.current_manifest.set_up_manifest()
+        
+    def update_mco_format_list(self):
+        
+        #generate Toplevel widget to allow user to make selections about what formats will be included
+        McoFormatTracker(self, self.controller)
+        
+class McoFormatTracker(tk.Toplevel):
+    def __init__(self, parent, controller):
+        tk.Toplevel.__init__(self, controller)
+        self.title('BDPL MCO Deposit: Update Settings')
+        self.iconbitmap(r'C:/BDPL/scripts/favicon.ico')
+        self.protocol('WM_DELETE_WINDOW', self.destroy)
+        self.attributes('-topmost', 'true')
+        self.controller = controller
+        self.parent = parent
+            
+        tab_frames_list = [('format_frame', 'Current Batch Will Include the Following Formats:'), ('new_formats_frame', 'Include Additional Formats in Batch:'), ('button_frame', 'Actions:')]
+        
+        self.tab_frames_dict = {}
+
+        for name_, label_ in tab_frames_list:
+            f = tk.LabelFrame(self, text = label_)
+            f.pack(fill=tk.BOTH, expand=True, pady=5)
+            self.tab_frames_dict[name_] = f
+        
+        '''
+        FORMAT FRAME
+        '''
+        #run method; we will update this frame as needed
+        self.update_format_frame()
+        
+        '''
+        NEW FORMATS FRAME
+        '''
+        ttk.Label(self.tab_frames_dict['new_formats_frame'], text='Add other file types (using format ".xxx"); delimit multiple entries with a comma.').grid(row=0, column=1, padx=10, pady=10)
+        
+        self.fmt_entry = tk.Entry(self.tab_frames_dict['new_formats_frame'],width=50)
+        self.fmt_entry.grid(row=1, column=1, padx=10, pady=10)   
+        
+        '''
+        BUTTON/ACTION FRAME
+        '''
+        buttons = ['Restore Defaults', 'Update', 'Close']
+        
+        self.button_id = {}
+
+        c=1
+        for b in buttons:
+            button = tk.Button(self.tab_frames_dict['button_frame'],text=b, bg='light slate gray', width =15)
+            button.grid(row=0, column=c, padx=10, pady=10)
+            self.button_id[b] = button
+            c+=1
+        
+        self.tab_frames_dict['button_frame'].grid_columnconfigure(0, weight=1)
+        self.tab_frames_dict['button_frame'].grid_columnconfigure(0, weight=4)
+        
+        self.button_id['Restore Defaults'].config(command=self.restore_defaults)
+        self.button_id['Update'].config(command=self.update_mco_format_list)
+        self.button_id['Close'].config(command=self.destroy)
+        
+    def restore_defaults(self):
+        self.parent.status_db['formats'] = ['.wav', '.mkv', '.mpg']
+        self.parent.status_db.sync()
+        
+        self.update_format_frame()
+        self.fmt_entry.delete(0, 'end')
+        
+    def update_format_frame(self):
+        
+        #remove secondary widget if it exists
+        try:
+            if self.current_format_frame.winfo_exists():
+                self.current_format_frame.destroy()
+        except AttributeError:
+            pass
+        
+        #create secondary frame
+        self.current_format_frame = tk.Frame(self.tab_frames_dict['format_frame'])
+        self.current_format_frame.pack(fill=tk.BOTH, expand=True)
+        
+        #add headers
+        ttk.Label(self.current_format_frame, text='Formats').grid(row=0, column=1, padx=10, pady=5)
+        ttk.Label(self.current_format_frame, text='Remove from list?').grid(row=0, column=2, padx=10, pady=5)
+        
+        #loop through format list; create label and checkbox in each
+        r=1
+        self.cb_vars={}
+        for fmt in self.parent.status_db['formats']:
+            
+            self.cb_vars[fmt] = tk.BooleanVar()
+            
+            ttk.Label(self.current_format_frame, text=fmt).grid(row=r, column=1, padx=10, pady=2)
+            
+            cb = ttk.Checkbutton(self.current_format_frame, variable=self.cb_vars[fmt])
+            cb.grid(row=r, column=2, padx=10, pady=2)
+            
+            r+=1
+        
+        self.current_format_frame.grid_columnconfigure(0, weight=1)
+        self.current_format_frame.grid_columnconfigure(3, weight=1)
+        
+    def update_mco_format_list(self):
+    
+        #update list if anything added
+        if len(self.fmt_entry.get()) > 0:
+            new_formats = self.fmt_entry.get().split(',')
+            
+            for fmt in new_formats:
+                #strip any whitespace
+                fmt = fmt.strip()
+                
+                #add new formats to our format list
+                if not fmt in self.parent.status_db['formats']:
+                    self.parent.status_db['formats'].append(fmt)
+        
+        #check if any current formats have been removed; loop through checkbuttons and associated fmts
+        for fmt, status in self.cb_vars.items():
+            
+            #if any checkbuttons have been selected, remove format from our list
+            if status.get():
+                self.parent.status_db['formats'].remove(fmt)
+                
+                #reset the checkbox while we're at it
+                status.set(False)
+        
+        #re-sort our list of fmts
+        self.parent.status_db['formats'].sort()
+        self.parent.status_db.sync()
+        
+        #now refresh our displayed format list, clear the Entry box
+        self.update_format_frame()
+        self.fmt_entry.delete(0, 'end')

@@ -38,7 +38,7 @@ import zipfile
 import Objects
 
 #BDPL files
-from BdplObjects import Unit, Shipment, DigitalObject, Spreadsheet, MasterSpreadsheet, ManualPremisEvent, RipstationBatch, SdaBatchDeposit
+from BdplObjects import Unit, Shipment, DigitalObject, Spreadsheet, MasterSpreadsheet, ManualPremisEvent, RipstationBatch, SdaBatchDeposit, McoBatchDeposit
 
 #set up as controller
 class BdplMainApp(tk.Tk):
@@ -145,7 +145,7 @@ class BdplMainApp(tk.Tk):
         tab = event.widget.nametowidget(event.widget.select())
         event.widget.configure(height=tab.winfo_reqheight())
         
-        if self.bdpl_notebook.tab(self.bdpl_notebook.select(), 'text') in ['BDPL Ingest',  'RipStation Ingest']:
+        if self.bdpl_notebook.tab(self.bdpl_notebook.select(), 'text') in ['BDPL Ingest',  'RipStation Ingest', 'Deposit to MCO']:
             if not self.checked_servers['bdpl_workspace']:
                 self.check_connection("bdpl_workspace")
                     
@@ -156,6 +156,10 @@ class BdplMainApp(tk.Tk):
     def check_main_vars(self):
         if self.unit_name.get() == '':
             return (False, '\n\nERROR: please make sure you have entered a unit ID abbreviation.')
+        else:
+            unit_home = os.path.join(self.bdpl_work_dir, self.unit_name.get())
+            if not os.path.exists(unit_home):
+                return (False, '\n\nERROR: {} does not exist. Make sure correct unit has been selected.'.format(unit_home))
 
         if self.shipment_date.get() == '':
             return (False, '\n\nERROR: please make sure you have entered a shipment date.')
@@ -179,6 +183,7 @@ class BdplMainApp(tk.Tk):
                 return (False, '\n\nERROR: select RipStation job option before continuing.')
         
         #if SDA Deposit, make sure that we have indicated a separations file, if separations_status is True
+        elif self.get_current_tab() == 'Deposit to SDA':
             if self.separations_status.get():
                 if self.separations_file.get() == '':
                     return(False, '\n\nERROR: shipment has separations, but file with associated information has not been identified.')
@@ -224,8 +229,6 @@ class BdplMainApp(tk.Tk):
         else:
             self.checked_servers[servername] = True
 
-        
-    
     def shipment_status(self):
         shipment_spreadsheet = Spreadsheet(self)
         shipment_spreadsheet.check_shipment_progress()
@@ -997,15 +1000,13 @@ class SdaDeposit(tk.Frame):
     def launch_sda_deposit(self):
 
         current_sda_batch = SdaBatchDeposit(self.controller)
-        master_spreadsheet = MasterSpreadsheet(self.controller)
-        shipment_spreadsheet = Spreadsheet(self.controller)
         
-        status, msg = current_sda_batch.prep_sda_batch(master_spreadsheet, shipment_spreadsheet)
+        status, msg = current_sda_batch.prep_sda_batch()
         if not status:
             print(msg)
             return
             
-        current_sda_batch.deposit_barcodes_to_sda(master_spreadsheet, shipment_spreadsheet)
+        current_sda_batch.deposit_barcodes_to_sda()
 
 class McoDeposit(tk.Frame):
     def __init__(self, parent, controller):
@@ -1086,16 +1087,17 @@ class McoDeposit(tk.Frame):
         button_id = {}
         
         c=1
-        for label_ in ['New', 'Prep Deposit', 'Move to MCO', 'Quit']:
-            b = tk.Button(self.tab_frames_dict['button_frame'], text=label_, width=15, bg='light slate gray')
+        for label_ in ['New', 'Settings', 'Prep Deposit', 'Move to MCO', 'Quit']:
+            b = tk.Button(self.tab_frames_dict['button_frame'], text=label_, width=10, bg='light slate gray')
             b.grid(row=0, column=c, padx=20, pady=10)
             button_id[label_] = b
             c+=1
         
         self.tab_frames_dict['button_frame'].grid_columnconfigure(0, weight=1)
-        self.tab_frames_dict['button_frame'].grid_columnconfigure(5, weight=1)
+        self.tab_frames_dict['button_frame'].grid_columnconfigure(6, weight=1)
         
         button_id['New'].config(command = self.controller.clear_gui)
+        button_id['Settings'].config(command=self.adjust_format_list)
         button_id['Prep Deposit'].config(command=self.prep_mco_deposit)
         button_id['Move to MCO'].config(command=self.move_to_mco_dropbox)
         button_id['Quit'].config(command = lambda: close_app(self.controller))
@@ -1107,7 +1109,12 @@ class McoDeposit(tk.Frame):
         #wait until TopLevel is closed before proceeding
         self.wait_window(make_connection)
         
-        print(self.username, self.password)
+        #if user just closes connection window, username/password will not have been recorded. Exit instead
+        try:
+            self.username
+            self.password
+        except (AttributeError, NameError):
+            return
         
         #create client object
         self.mco_client = McoSftpClient(self.controller, self.username, self.password, self.mco_server, self.mco_dir)
@@ -1139,10 +1146,39 @@ class McoDeposit(tk.Frame):
         except (NameError, AttributeError):
             pass
     
+    def adjust_format_list(self):
+    
+        #make sure variables have been entered
+        status, msg = self.controller.check_main_vars()
+        if not status:
+            print(msg)
+            return
+        
+        #create batch object if it doesn't already exist
+        if not hasattr(self, 'mco_batch'):
+            self.mco_batch = McoBatchDeposit(self.controller)
+        
+        self.mco_batch.update_mco_format_list()
+        
     def prep_mco_deposit(self):
-        pass
+        
+        #make sure variables have been entered
+        status, msg = self.controller.check_main_vars()
+        if not status:
+            print(msg)
+            return
+            
+        #create batch object if it doesn't already exist
+        if not hasattr(self, 'mco_batch'):
+            self.mco_batch = McoBatchDeposit(self.controller)
         
     def move_to_mco_dropbox(self):
+        
+        #make sure variables have been entered
+        status, msg = self.controller.check_main_vars()
+        if not status:
+            print(msg)
+            return
         
         if self.mco_collection_name.get() == '':
             
