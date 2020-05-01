@@ -2729,6 +2729,27 @@ class McoSpreadsheet(Spreadsheet):
         
         self.wb.save(self.spreadsheet)
         
+    def add_columns(self, column_count):
+        #new 'file' column will be two over from the last one
+        current_max = max(column_count.keys()) + 2
+        
+        self.mco_ws.insert_cols(current_max)
+        
+        self.mco_ws.cell(row=2, column=current_max, value='File')
+        
+        #add new 'label' column
+        current_max += 1
+        
+        self.mco_ws.insert_cols(current_max)
+        
+        self.mco_ws.cell(row=2, column=current_max, value='Label')
+        
+        self.wb.save(self.spreadsheet)
+        
+    def write_row(self, metadata):
+        
+        self.mco_ws.append(metadata.values())
+        self.wb.save(self.spreadsheet)
 
 class ManualPremisEvent(tk.Toplevel):
     def __init__(self, controller):
@@ -3972,8 +3993,10 @@ class McoBatchDeposit(Shipment):
         self.status_db = shelve.open(self.mco_status, writeback=True)
         
         #check for key objects in the shelve; create if they don't exist
-        if not self.status_db.get('formats'):
-            self.status_db['formats'] = ['.wav', '.mkv', '.mpg']
+        if not self.status_db.get('audio_formats'):
+            self.status_db['audio_formats'] = ['.wav']
+        if not self.status_db.get('video_formats'):
+            self.status_db['video_formats'] = ['.mkv', '.mpg']
 
         #get a shipment spreadsheet
         self.shipment_spreadsheet = Spreadsheet(self.controller)
@@ -3983,7 +4006,10 @@ class McoBatchDeposit(Shipment):
 
     def prep_batches_for_mco(self):
         
-        #if batch_info dict doesn't exist, set it up 
+        #set up resources to track progress
+        if not self.status_db.get('master_list'):
+            self.status_db['master_list'] = []
+            
         if not self.status_db.get('batch_info'):
             self.status_db['batch_info'] = {}
             self.current_batch = 0
@@ -3991,57 +4017,290 @@ class McoBatchDeposit(Shipment):
             self.new_batch()
             
         else:
-            self.current_batch = len(self.status_db['batch_info'])            
-            self.current_item_count = len(self.status_db['batch_info'][self.current_batch])
+            self.current_batch = max(1, len(self.status_db['batch_info']))            
         
             #manifest and other items should have already been set up; call it up
             self.current_manifest = McoSpreadsheet(self.controller, self)
-            
-        if not self.status_db.get('master_list'):
-            self.status_db['master_list'] = []
         
+        #now loop through shipment to identify items designated for MCO deposit
         for barcode in self.shipment_spreadsheet.app_ws['A'][1:]:
-            if barcode is None:
-                continue
             
             #if the most recent batch reached batch_size limit, start a new batch
-            if self.current_item_count == self.batch_size:
+            if len(self.status_db['batch_info'][self.current_batch]) == self.batch_size:
                 self.new_batch()
             
+            #skip any empty rows
+            if barcode is None:
+                continue
+
             #set identifier variable
-            self.controller.identifier.identifier.set(barcode.strip())
+            self.controller.identifier.set(barcode.strip())
             
             #set up DigitalObject
             current_item = DigitalObject(self.controller)
             
-            #skip if we've already completed item 
-            if current_item.identifier in self.status_db['master_list']:
+            #skip if we've already completed item or if barcode_dir doesn't exist
+            if current_item.identifier in self.status_db['master_list'] or not os.path.exists(current_item.barcode_dir):
                 continue
             
-            #skip if barcode_dir doesn't exist
-            if not os.path.exists(current_item.barcode_dir):
-                continue
-            
-            print('\n\nCURRENT ITEM: {}'.format(current_item.identifier)
+            print('\n\nCURRENT ITEM: {}'.format(current_item.identifier))
             
             #load metadata if we've made it this far...
             current_item.load_item_metadata(self.shipment_spreadsheet)
             
+            #skip if not designated for MCO
             if not 'mco' in current_item.current_dict['final_appraisal']:
                 print('\n\tDo not deposit to MCO')
                 continue
             
+            #shorthand references for our status shelves
+            self.current_batch_list = self.status_db['batch-list_{}'.format(str(self.current_batch).zfill(2))]
+            
+            self.status_db['batch_info'][self.current_batch][current_item.identifer] = {}
+            
+            self.item_info = self.status_db['batch_info'][self.current_batch][current_item.identifer]
+            
+            '''
+            set metadata for item in MCO
+            '''
+            #set item_title
+            if current_item.current_dict.get('item_title') and current_item.current_dict['item_title'] not in ['', '-', 'N/A']:
+                item_title = current_item.current_dict['item_title']
+            else:
+                item_title = current_item.current_dict['label_transcription']
+            
+            #set item_description
+            item_description = current_item.current_dict['item_description']
+            
+            #set date_issued
+            if current_item.current_dict.get('assigned_dates') and current_item.current_dict['assigned_dates'] not in ['', '-', 'N/A']:
+                date_issued = current_item.current_dict['assigned_dates'].replace(' ', '').replace('-', '/')
+            else:
+                if current_item.current_dict['begin_date'] == current_item.current_dict['end_date']:
+                    date_issued = current_item.current_dict['begin_date'].replace('undated', '')
+                else:
+                    date_issued = "{}/{}".format(current_item.current_dict['begin_date'], current_item.current_dict['end_date'])
+            
+            #set phys_descr
+            if current_item.current_dict.get('job_type') in ['DVD', 'CDDA']:
+                phys_descr = 'Optical disc'
+            else:
+                phys_descr = ''
+            
+            #assign values in item_info dict
+            self.item_info = {'BDPLID' : current_item.identifer, 
+                            'ID_Type_3' : 'BDPL ID', 
+                            'CollectionID' : current_item.current_dict.get('collection_id', current_item.current_dict['current_coll_id']),
+                            'ID_Type_1' : 'Collection ID',  
+                            'AccessionID' : current_item.current_dict.get('accession_number', current_item.current_dict['current_accession']), 
+                            'ID_Type_2' : 'Accession ID', 
+                            'Title' : item_title, 
+                            'Creator' : current_item.current_dict['collection_creator'], 
+                            'DateIssued' : date_issued, 
+                            'Abstract' : item_description, 
+                            'PhysicalDescription' : phys_descr, 
+                            'Publish' : 'No'}
+            
+            #try to clear out any bad data
+            for k, v in self.item_info.items():
+                if v in ['-', 'N/A', ' ']:
+                    self.item_info[k] = ''
+            
+            self.status_db.sync()
+                    
+            '''
+            Now look for our files. 
+            
+            NOTE: we may need to change how we acquire these; it could involve a text file with paths, e.g.:
+            
+            with open(file_list, 'rb') as f:
+                for line in f.read().splitlines():
+                    print(line.decode().replace(os.sep, os.altsep))
+            '''
+            self.status_db['audio_file_list'] = [f for f in os.listdir(current_item.files_dir) if os.path.splitext(f)[-1].lower() in self.status_db['audio_formats']]
+            
+            self.status_db['cue_file_list'] = [f for f in os.listdir(current_item.files_dir) if os.path.splitext(f)[-1].lower() == '.cue']
+            
+            self.status_db['video_file_list'] = [f for f in os.listdir(current_item.files_dir) if os.path.splitext(f)[-1].lower() in self.status_db['video_formats']]
+            
+            #now loop through our lists
+            for ls in [self.status_db['video_file_list'], self.status_db['audio_file_list']]:
+                
+                if len(ls) == 0:
+                    continue
+            
+                #establish type of content. NOTE: may need to change labels, based upon content source...            
+                if ls == self.status_db['audio_file_list']:
+                    label = 'CD'
+                else:
+                    label = 'DVD'
+                        
+                #loop through items in each list
+                for i in range(0, len(ls)):
+                
+                    mco_file = ls[i]
+                    
+                    mco_file_full_path = os.path.join(current_item.files_dir, mco_file).replace(os.sep, os.altsep)
+                    
+                    mco_file_path_for_spreadsheet = os.path.relpath(mco_file_full_path, self.ship_dir).replace(os.sep, os.altsep)
+                    
+                    print('\nWorking on {}'.format(mco_file))
+                    
+                    #assign File & Label values in mco metadata dictionary
+                    self.item_info['File_{}'.format(i)] = mco_file_path_for_spreadsheet
+                    self.item_info['Label_{}'.format(i)] = '{} part {}'.format(label, i+1)
+                    
+                    #get current count of 'file' fields in MCO spreadshet--may have multiple files per MCO item
+                    column_count = {i : cell.value for i, cell in enumerate(self.current_manifest.mco_ws[2], 1) if cell.value == 'File'}
+                    
+                    #if we exceed current # of 'File'/'Label' fields in the spreadsheet, we need to add a new one
+                    if i+1 > len(column_count):
+                        self.current_manifest.add_columns(column_count)
+                        
+                    #add file to our copy list
+                    self.current_batch_list.append(mco_file_full_path)
+                    
+                    #for audio files with CUE: create structure.xml file
+                    if label == 'CD':
+                        #cue file should have same base filename as associated wav: match 'em up!
+                        found_cue = [c for c in cue_file_list if os.path.splitext(c)[0] == os.path.splitext(mco_file)[0]]
+                        
+                        #if we've found a wav_cue_file file, convert to structure.xml
+                        if found_cue:
+                            
+                            #for old content, where job_type wasn't recorded: make sure we note it was an optical disk...
+                            if self.item_info['PhysicalDescription'] == '':
+                                self.item_info['PhysicalDescription'] = 'Optical disc'
+                            
+                            cue_file = os.path.join(current_item.files_dir, found_cue[0])
+                    
+                            print('\tCreating structure.xml file for audio...', cue_file)
+                            
+                            #get info from wav_cue_file file.  NOTE: old procedures resulted in an encoding issue and do not reference the WAV file; let's try to fix those!
+                            while True:
+                                try:
+                                    with open(cue_file, 'r') as f:
+                                        cue_contents = f.read().splitlines()
+                                        
+                                    if 'BINARY' in cue_contents[0]:
+                                        fix_cue(current_item.files_dir, cue_file)
+                                    elif 'WAVE' in cue_contents[0]:
+                                        break
+                                
+                                #if we get UnicodeDecodeError, we should fix cue files in both files_dir and image_dir
+                                except UnicodeDecodeError:
+                                    #fix the wav cue file
+                                    fix_cue(current_item.files_dir, cue_file)
+                                    
+                                    #grab bin cue(s) and fix them, too.
+                                    bin_cues = glob.glob(os.path.join(current_item.image_dir, '*.cue'))
+                                    for bc in bin_cues:
+                                        fix_cue(current_item.image_dir, bc)
+                            
+                            #pull out tracks and time indices
+                            tracks = [c.strip().replace(' AUDIO', '').capitalize() for c in cue_contents if "TRACK" in c]
+                            
+                            times = [':'.join(c.split()[2].split(':', 2)[:2]) for c in cue_contents if "INDEX 01" in c]
+                            
+                            #set up dictionary to store track information
+                            track_info = {}
+                            
+                            #loop through our list of tracks; each track should have a corresponding INDEX 01 timestamp
+                            for i in range(0, len(tracks)):
+                                
+                                #get the begin time.  
+                                if times[i] == '00:00':
+                                    begin_time = '0'
+                                else:
+                                    begin_time = times[i]
+                                
+                                #get end time; final track does not need one
+                                if times[i] == times[-1]:
+                                    track_info[tracks[i]] = {'begin':begin_time}
+                                else:
+                                    end_time = calc_end_time(times[i+1])
+                                    
+                                    track_info[tracks[i]] = {'begin' : begin_time, 'end' : end_time}
+                                    
+                            #start creating our structure xml doc with lxml
+                            structure_xml = os.path.join(self.mco_report_dir, '{}.structure.xml'.format(mco_file)).replace(os.sep, os.altsep)
+                            
+                            item = etree.Element('item')
+                            item.attrib['label'] = self.item_info.get('Title', 'Audio recording').replace('"', "'").replace('&', 'and').strip()
+                            
+                            #loop through our track info to pull in info for the individual 'spans'
+                            for track in track_info.keys():
+                                span = etree.SubElement(item, 'span')
+                                span.attrib['label'] = track
+                                span.attrib['begin'] = track_info[track]['begin']
+                                #only include 'end' attribute if we have an end time
+                                if track_info[track].get('end'):
+                                    span.attrib['end'] = track_info[track]['end']
+                            
+                            #write etree to file in mco assets folder
+                            structure_tree = etree.ElementTree(item)
+                            structure_tree.write(structure_xml, pretty_print=True)
+                            
+                            #write file to copy list
+                            self.current_batch_list.append(structure_xml)
+            
+            #save info to manifest
+            self.current_manifest.write_row(self.item_info)
+            
+            print('\n\n----------------------------------------------------------------------------------------------------\n\nMCO preparation complete. Run "move" operation after review of MCO spreadsheet(s).')
+                
+    
+    def calc_end_time(self, timestamp):
+    
+        min, sec = timestamp.split(':')
         
+        if sec == '00':
+            sec = 59
+            min = int(min) - 1
+        else:
+            sec = int(sec) - 1
+        
+        return "{}:{}".format(str(min).zfill(2), str(sec).zfill(2))
+    
+    def fix_cue(self, folder, cue_file):
+    
+        print('\tFixing {}...'.format(cue_file))
+        
+        #get audio file
+        if 'disk-image' in folder:
+            audio = '{}.bin'.format(os.path.basename(os.path.splitext(cue_file)[0]))
+            type = 'BINARY'
+        else: 
+            audio = '{}.wav'.format(os.path.basename(os.path.splitext(cue_file)[0]))
+            type = 'WAVE'
+        
+        #get info from cue file
+        with open(cue_file, 'rb') as infile:
+            cue_info = infile.readlines()[1:]
+        
+        #write correct 1st line
+        with open(cue_file, 'w') as outfile:
+            if type == 'BINARY':
+                outfile.write('FILE "{}" BINARY\n'.format(audio))
+            else:
+                outfile.write('FILE "{}" WAVE\n'.format(audio))
+        
+        #append rest of cue info
+        with open(cue_file, 'ab') as outfile:
+            for line in cue_info:
+                outfile.write(line)                        
+                    
     def new_batch(self):
         #reset variables
-        self.current_item_count = 0
         self.current_batch += 1
         
         #set up batch_info
-        self.status_db['batch_info'][self.current_batch] = []
+        if not self.status_db['batch_info'].get(self.current_batch):
+            self.status_db['batch_info'][self.current_batch] = {}
         
         #set up list to track files
-        self.status_db['copy_list-batch_{}'.format(str(self.current_batch).zfill(2))] =[]
+        if not self.status_db.get('batch-list_{}'.format(str(self.current_batch).zfill(2))):
+            self.status_db['batch-list_{}'.format(str(self.current_batch).zfill(2))] =[]
         
         #set up new manifest
         self.current_manifest = McoSpreadsheet(self.controller, self)
@@ -4080,10 +4339,18 @@ class McoFormatTracker(tk.Toplevel):
         '''
         NEW FORMATS FRAME
         '''
-        ttk.Label(self.tab_frames_dict['new_formats_frame'], text='Add other file types (using format ".xxx"); delimit multiple entries with a comma.').grid(row=0, column=1, padx=10, pady=10)
+        ttk.Label(self.tab_frames_dict['new_formats_frame'], text='Add other file types (using format ".xxx"); delimit multiple entries with a comma.').grid(row=0, column=1, columnspan=2, padx=10, pady=10)
         
-        self.fmt_entry = tk.Entry(self.tab_frames_dict['new_formats_frame'],width=50)
-        self.fmt_entry.grid(row=1, column=1, padx=10, pady=10)   
+        ttk.Label(self.tab_frames_dict['new_formats_frame'], text='Audio:').grid(row=1, column=1, padx=(10,0), pady=10)
+        self.audio_fmt_entry = tk.Entry(self.tab_frames_dict['new_formats_frame'],width=30)
+        self.audio_fmt_entry.grid(row=1, column=2, padx=(0,10), pady=10)  
+
+        ttk.Label(self.tab_frames_dict['new_formats_frame'], text='Video:').grid(row=2, column=1, padx=(10,0), pady=10)
+        self.video_fmt_entry = tk.Entry(self.tab_frames_dict['new_formats_frame'],width=30)
+        self.video_fmt_entry.grid(row=2, column=2, padx=(0,10), pady=10)
+        
+        self.tab_frames_dict['new_formats_frame'].grid_columnconfigure(0, weight=1)
+        self.tab_frames_dict['new_formats_frame'].grid_columnconfigure(3, weight=4)
         
         '''
         BUTTON/ACTION FRAME
@@ -4100,18 +4367,18 @@ class McoFormatTracker(tk.Toplevel):
             c+=1
         
         self.tab_frames_dict['button_frame'].grid_columnconfigure(0, weight=1)
-        self.tab_frames_dict['button_frame'].grid_columnconfigure(0, weight=4)
+        self.tab_frames_dict['button_frame'].grid_columnconfigure(4, weight=4)
         
         self.button_id['Restore Defaults'].config(command=self.restore_defaults)
         self.button_id['Update'].config(command=self.update_mco_format_list)
         self.button_id['Close'].config(command=self.destroy)
         
     def restore_defaults(self):
-        self.parent.status_db['formats'] = ['.wav', '.mkv', '.mpg']
+        self.parent.self.status_db['audio_formats'] = ['.wav']
+        self.status_db['video_formats'] = ['.mkv', '.mpg']
         self.parent.status_db.sync()
         
         self.update_format_frame()
-        self.fmt_entry.delete(0, 'end')
         
     def update_format_frame(self):
         
@@ -4126,55 +4393,88 @@ class McoFormatTracker(tk.Toplevel):
         self.current_format_frame = tk.Frame(self.tab_frames_dict['format_frame'])
         self.current_format_frame.pack(fill=tk.BOTH, expand=True)
         
+        #figure out max height of columns
+        separator_height = max(len(self.parent.status_db['audio_formats']), len(self.parent.status_db['video_formats'])) + 2
+        
         #add headers
-        ttk.Label(self.current_format_frame, text='Formats').grid(row=0, column=1, padx=10, pady=5)
-        ttk.Label(self.current_format_frame, text='Remove from list?').grid(row=0, column=2, padx=10, pady=5)
+        ttk.Label(self.current_format_frame, text='Audio').grid(row=0, column=1, padx=(10, 5), pady=(10,2))
+        ttk.Label(self.current_format_frame, text='Remove from list?').grid(row=0, column=2, padx=(5, 10), pady=(10,2))
+        
+        ttk.Label(self.current_format_frame, text='Video').grid(row=0, column=4, padx=(10, 5), pady=(10,2))
+        ttk.Label(self.current_format_frame, text='Remove from list?').grid(row=0, column=5, padx=(5, 10), pady=(10,2))
+        
+        #add separator
+        ttk.Separator(self.current_format_frame, orient=tk.VERTICAL).grid(column=3, row=0, rowspan=6, sticky='ns')
         
         #loop through format list; create label and checkbox in each
-        r=1
-        self.cb_vars={}
-        for fmt in self.parent.status_db['formats']:
+        self.audio_cb_vars={}
+        self.video_cb_vars={}
+        
+        for type in ['audio', 'video']:
             
-            self.cb_vars[fmt] = tk.BooleanVar()
+            if type == 'audio':
+                dct = self.audio_cb_vars
+                c=1
+            else:
+                dct = self.video_cb_vars
+                c=4
+                
+            r=2
             
-            ttk.Label(self.current_format_frame, text=fmt).grid(row=r, column=1, padx=10, pady=2)
-            
-            cb = ttk.Checkbutton(self.current_format_frame, variable=self.cb_vars[fmt])
-            cb.grid(row=r, column=2, padx=10, pady=2)
-            
-            r+=1
+            for fmt in self.parent.status_db['{}_formats'.format(type)]:
+                
+                dct[fmt] = tk.BooleanVar()
+                
+                ttk.Label(self.current_format_frame, text=fmt).grid(row=r, column=c, padx=(10, 5), pady=2)
+                
+                cb = ttk.Checkbutton(self.current_format_frame, variable=dct[fmt])
+                cb.grid(row=r, column=(c+1), padx=(5, 10), pady=2)
+                
+                r+=1
         
         self.current_format_frame.grid_columnconfigure(0, weight=1)
-        self.current_format_frame.grid_columnconfigure(3, weight=1)
+        self.current_format_frame.grid_columnconfigure(6, weight=1)
+        
+        #clear entry forms; will need to skip the first time around
+        try:
+            self.audio_fmt_entry.delete(0, 'end')
+            self.video_fmt_entry.delete(0, 'end')
+        except AttributeError:
+            pass
         
     def update_mco_format_list(self):
     
         #update list if anything added
-        if len(self.fmt_entry.get()) > 0:
-            new_formats = self.fmt_entry.get().split(',')
+        
+        for entry, type in [(self.audio_fmt_entry, 'audio'), (self.video_fmt_entry, 'video')]:
             
-            for fmt in new_formats:
-                #strip any whitespace
-                fmt = fmt.strip()
+            if len(entry.get()) > 0:
+                new_formats = entry.get().split(',')
                 
-                #add new formats to our format list
-                if not fmt in self.parent.status_db['formats']:
-                    self.parent.status_db['formats'].append(fmt)
+                for fmt in new_formats:
+                    #strip any whitespace
+                    fmt = fmt.strip()
+                    
+                    #add new formats to our format list
+                    if not fmt in self.parent.status_db['{}_formats'.format(type)]:
+                        self.parent.status_db['{}_formats'.format(type)].append(fmt)
         
         #check if any current formats have been removed; loop through checkbuttons and associated fmts
-        for fmt, status in self.cb_vars.items():
-            
-            #if any checkbuttons have been selected, remove format from our list
-            if status.get():
-                self.parent.status_db['formats'].remove(fmt)
+        for dct, type in [(self.audio_cb_vars, 'audio'), (self.video_cb_vars, 'video')]:
+            for fmt, status in dct.items():
                 
-                #reset the checkbox while we're at it
-                status.set(False)
+                #if any checkbuttons have been selected, remove format from our list
+                if status.get():
+                    self.parent.status_db['{}_formats'.format(type)].remove(fmt)
+                    
+                    #reset the checkbox while we're at it
+                    status.set(False)
         
         #re-sort our list of fmts
-        self.parent.status_db['formats'].sort()
+        for type in ['audio', 'video']:
+            self.parent.status_db['{}_formats'.format(type)].sort()
+            
         self.parent.status_db.sync()
         
-        #now refresh our displayed format list, clear the Entry box
+        #now refresh our displayed format list
         self.update_format_frame()
-        self.fmt_entry.delete(0, 'end')
