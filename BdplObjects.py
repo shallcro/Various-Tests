@@ -27,6 +27,7 @@ import time
 import tkinter as tk
 from tkinter import ttk
 from tkinter import filedialog
+from tkinter import messagebox
 from urllib.parse import unquote
 import urllib.request
 import uuid
@@ -2704,7 +2705,7 @@ class McoSpreadsheet(Spreadsheet):
         self.controller = controller
         self.parent = mco_batch
         
-        self.spreadsheet = os.path.join(self.parent.mco_report_dir, '{}_{}_MCO_deposit_batch_{}.xlsx'.format(self.unit_name, self.shipment_date, str(self.parent.current_batch).zfill(2)))
+        self.spreadsheet = os.path.join(self.parent.mco_report_dir, '{}_{}_MCO_deposit_batch_{}.xlsx'.format(self.unit_name, self.shipment_date, str(self.parent.current_batch_no).zfill(2)))
         
         #open spreadsheet
         self.open_wb()
@@ -2718,7 +2719,7 @@ class McoSpreadsheet(Spreadsheet):
             self.parent.status_db['unit_liaison'] = self.parent.shipment_spreadsheet.get_unit_liaison()
         
         #set up headers
-        description = 'BDPL deposit to MCO: {} shipment {}, batch {} ({})'.format(self.unit_name, self.shipment_date, str(self.parent.current_batch).zfill(2), deposit_date)
+        description = 'BDPL deposit to MCO: {} shipment {}, batch {} ({})'.format(self.unit_name, self.shipment_date, str(self.parent.current_batch_no).zfill(2), deposit_date)
         contact_info = self.parent.status_db.get('unit_liaison', 'micshall@iu.edu')
         
         reference_info = [description, contact_info]
@@ -4012,12 +4013,12 @@ class McoBatchDeposit(Shipment):
             
         if not self.status_db.get('batch_info'):
             self.status_db['batch_info'] = {}
-            self.current_batch = 0
+            self.current_batch_no = 0
             #since this is the first time through, set up new_batch resources
             self.new_batch()
             
         else:
-            self.current_batch = max(1, len(self.status_db['batch_info']))            
+            self.current_batch_no = max(1, len(self.status_db['batch_info']))            
         
             #manifest and other items should have already been set up; call it up
             self.current_manifest = McoSpreadsheet(self.controller, self)
@@ -4026,7 +4027,7 @@ class McoBatchDeposit(Shipment):
         for barcode in self.shipment_spreadsheet.app_ws['A'][1:]:
             
             #if the most recent batch reached batch_size limit, start a new batch
-            if len(self.status_db['batch_info'][self.current_batch]) == self.batch_size:
+            if len(self.status_db['batch_info'][self.current_batch_no]) == self.batch_size:
                 self.new_batch()
             
             #skip any empty rows
@@ -4053,13 +4054,15 @@ class McoBatchDeposit(Shipment):
                 print('\n\tDo not deposit to MCO')
                 continue
             
+            #add identifier to our tracking lists
+            self.status_db['master_list'].append(current_item.identifer)
+            self.status_db['batch_info'][self.current_batch_no][current_item.identifer] = {}
+            
             #shorthand references for our status shelves
-            self.current_batch_list = self.status_db['batch-list_{}'.format(str(self.current_batch).zfill(2))]
+            self.item_info = self.status_db['batch_info'][self.current_batch_no][current_item.identifer]
             
-            self.status_db['batch_info'][self.current_batch][current_item.identifer] = {}
-            
-            self.item_info = self.status_db['batch_info'][self.current_batch][current_item.identifer]
-            
+            self.current_batch_list = self.status_db['batch-list_{}'.format(str(self.current_batch_no).zfill(2))]
+                        
             '''
             set metadata for item in MCO
             '''
@@ -4122,6 +4125,8 @@ class McoBatchDeposit(Shipment):
             self.status_db['cue_file_list'] = [f for f in os.listdir(current_item.files_dir) if os.path.splitext(f)[-1].lower() == '.cue']
             
             self.status_db['video_file_list'] = [f for f in os.listdir(current_item.files_dir) if os.path.splitext(f)[-1].lower() in self.status_db['video_formats']]
+            
+            self.status_db.sync()
             
             #now loop through our lists
             for ls in [self.status_db['video_file_list'], self.status_db['audio_file_list']]:
@@ -4247,8 +4252,10 @@ class McoBatchDeposit(Shipment):
             #save info to manifest
             self.current_manifest.write_row(self.item_info)
             
-            print('\n\n----------------------------------------------------------------------------------------------------\n\nMCO preparation complete. Run "move" operation after review of MCO spreadsheet(s).')
-                
+        print('\n\n----------------------------------------------------------------------------------------------------\n\nMCO preparation complete. Run "move" operation after review of MCO spreadsheet(s).')
+        
+        #close shelve
+        self.status_db.close()   
     
     def calc_end_time(self, timestamp):
     
@@ -4292,15 +4299,15 @@ class McoBatchDeposit(Shipment):
                     
     def new_batch(self):
         #reset variables
-        self.current_batch += 1
+        self.current_batch_no += 1
         
         #set up batch_info
-        if not self.status_db['batch_info'].get(self.current_batch):
-            self.status_db['batch_info'][self.current_batch] = {}
+        if not self.status_db['batch_info'].get(self.current_batch_no):
+            self.status_db['batch_info'][self.current_batch_no] = {}
         
         #set up list to track files
-        if not self.status_db.get('batch-list_{}'.format(str(self.current_batch).zfill(2))):
-            self.status_db['batch-list_{}'.format(str(self.current_batch).zfill(2))] =[]
+        if not self.status_db.get('batch-list_{}'.format(str(self.current_batch_no).zfill(2))):
+            self.status_db['batch-list_{}'.format(str(self.current_batch_no).zfill(2))] =[]
         
         #set up new manifest
         self.current_manifest = McoSpreadsheet(self.controller, self)
@@ -4310,13 +4317,142 @@ class McoBatchDeposit(Shipment):
         
         #generate Toplevel widget to allow user to make selections about what formats will be included
         McoFormatTracker(self, self.controller)
+       
+    def select_batch_to_mco(self, mco_destination):
+        self.mco_destination = mco_destination      
         
+        #set up list to track our batches
+        if not self.status_db.get('moved_batches'):
+            self.status_db['moved_batches'] = []
+        
+        #get info about batches
+        self.batches = list(self.parent.status_db['batch_info'].keys())
+        
+        if len(self.batches) == 1:
+            batch = self.batches[0]
+            if batch in self.status_db['moved_batches']:
+                messagebox.showwarning(title='WARNING', message='Batch has already been moved to MCO dropbox.', master=self)
+                return
+            else:
+                self.move_batch(batch)
+                
+        elif len(self.batches) > 1:
+            McoBatchPicker(self, self.controller)
+            
+        else:
+            messagebox.showwarning(title='WARNING', message='No batches have been prepared for this shipment.', master=self)
+            return
+            
+    def move_batch(self, batch):
+    
+        if batch == '':
+            messagebox.showwarning(title='WARNING', message='Select a batch from this shipment to move to the MCO dropbox', master=self)
+            return
+            
+        #set up resources
+        batch_list = self.status_db['batch-list_{}'.format(str(batch).zfill(2))]
+        
+        ###CAN WE USE THE new_batch METHOD HERE?  MAY NEED TO CHANGE HOW WE PASS CURRENT_BATCH_NO...
+
+class McoBatchPicker(tk.Toplevel):
+    def __init__(self, parent, controller):
+        tk.Toplevel.__init__(self, controller)
+        self.title('BDPL MCO Deposit: Select a Batch')
+        self.iconbitmap(r'C:/BDPL/scripts/favicon.ico')
+        self.protocol('WM_DELETE_WINDOW', self.close_top)
+        self.attributes('-topmost', 'true')
+        self.controller = controller
+        self.parent = parent     
+        self.batches = self.parent.batches
+        
+ 
+        
+        self.selected_batch = StringVar()
+        self.selected_batch.set('')
+        
+        tab_frames_list = [('batch_frame', 'MCO Batches in Current Shipment:'), ('button_frame', 'Actions:')]
+        
+        self.tab_frames_dict = {}
+
+        for name_, label_ in tab_frames_list:
+            f = tk.LabelFrame(self, text = label_)
+            f.pack(fill=tk.BOTH, expand=True, pady=5)
+            self.tab_frames_dict[name_] = f
+        
+        '''
+        BATCH FRAME
+        '''
+        self.update_batch_info()
+            
+        '''
+        ACTION/BUTTON FRAME
+        '''
+        
+        buttons = ['Move Batch', 'Close']
+        
+        self.button_id = {}
+
+        c=1
+        for b in buttons:
+            button = tk.Button(self.tab_frames_dict['button_frame'],text=b, bg='light slate gray', width =15)
+            button.grid(row=0, column=c, padx=10, pady=10)
+            self.button_id[b] = button
+            c+=1
+        
+        self.tab_frames_dict['button_frame'].grid_columnconfigure(0, weight=1)
+        self.tab_frames_dict['button_frame'].grid_columnconfigure(2, weight=1)
+        
+        self.button_id['Move Batch'].config(command=lambda:self.parent.move_batch(batch))
+        
+        self.button_id['Close'].config(command=self.close_top)
+    
+    def update_batch_info(self):
+    
+        #remove secondary widget if it exists
+        try:
+            if self.current_batch_frame.winfo_exists():
+                self.current_batch_frame.destroy()
+        except AttributeError:
+            pass
+        
+        #create secondary frame
+        self.current_batch_frame = tk.Frame(self.tab_frames_dict['batch_frame'])
+        self.current_batch_frame.pack(fill=tk.BOTH, expand=True)
+    
+        #instructions
+        ttk.Label(self.current_batch_frame, text='Select a batch to move to MCO dropbox:').grid(row=0, column=1, columnspan=2, pady=5)
+        
+        #create headers
+        c = 1
+        for label_ in ['Batch #:', 'Status:']
+            ttk.Label(self.current_batch_frame, text=label_).grid(row=1, column=c, padx=10, pady=2)
+            c+=1
+        
+        #list batches and status
+        r=2
+        for batch in self.batches:
+            ttk.Label(self.current_batch_frame, text=str(batch).zfill(2)).grid(row=r, column=1, padx=10, pady=2)
+            
+            if batch in self.parent.status_db['moved_batches']:
+                ttk.Label(self.current_batch_frame, text='Completed').grid(row=r, column=2, padx=10, pady=2)
+            else:
+                rb = ttk.Radiobutton(self.current_batch_frame, variable = self.selected_batch, value = batch)
+                rb.grid(row=r, column=2, padx=10, pady=2)
+            
+            r+=1
+            
+        self.current_batch_frame.grid_columnconfigure(0, weight=1)
+        self.current_batch_frame.grid_columnconfigure(3, weight=1)
+
+    def close_top(self):
+        self.destroy()
+
 class McoFormatTracker(tk.Toplevel):
     def __init__(self, parent, controller):
         tk.Toplevel.__init__(self, controller)
         self.title('BDPL MCO Deposit: Update Settings')
         self.iconbitmap(r'C:/BDPL/scripts/favicon.ico')
-        self.protocol('WM_DELETE_WINDOW', self.destroy)
+        self.protocol('WM_DELETE_WINDOW', self.close_top)
         self.attributes('-topmost', 'true')
         self.controller = controller
         self.parent = parent
@@ -4339,7 +4475,7 @@ class McoFormatTracker(tk.Toplevel):
         '''
         NEW FORMATS FRAME
         '''
-        ttk.Label(self.tab_frames_dict['new_formats_frame'], text='Add other file types (using format ".xxx"); delimit multiple entries with a comma.').grid(row=0, column=1, columnspan=2, padx=10, pady=10)
+        ttk.Label(self.tab_frames_dict['new_formats_frame'], text='Add file extensions (e.g., ".xxx"); delimit multiple entries with a comma.').grid(row=0, column=1, columnspan=2, padx=10, pady=10)
         
         ttk.Label(self.tab_frames_dict['new_formats_frame'], text='Audio:').grid(row=1, column=1, padx=(10,0), pady=10)
         self.audio_fmt_entry = tk.Entry(self.tab_frames_dict['new_formats_frame'],width=30)
@@ -4350,7 +4486,7 @@ class McoFormatTracker(tk.Toplevel):
         self.video_fmt_entry.grid(row=2, column=2, padx=(0,10), pady=10)
         
         self.tab_frames_dict['new_formats_frame'].grid_columnconfigure(0, weight=1)
-        self.tab_frames_dict['new_formats_frame'].grid_columnconfigure(3, weight=4)
+        self.tab_frames_dict['new_formats_frame'].grid_columnconfigure(3, weight=1)
         
         '''
         BUTTON/ACTION FRAME
@@ -4367,11 +4503,17 @@ class McoFormatTracker(tk.Toplevel):
             c+=1
         
         self.tab_frames_dict['button_frame'].grid_columnconfigure(0, weight=1)
-        self.tab_frames_dict['button_frame'].grid_columnconfigure(4, weight=4)
+        self.tab_frames_dict['button_frame'].grid_columnconfigure(4, weight=1)
         
         self.button_id['Restore Defaults'].config(command=self.restore_defaults)
-        self.button_id['Update'].config(command=self.update_mco_format_list)
-        self.button_id['Close'].config(command=self.destroy)
+        self.button_id['Update'].config(command=self.update_current_list)
+        self.button_id['Close'].config(command=self.close_top)
+        
+    def close_top(self):
+        #close shelve
+        self.parent.status_db.close()
+        
+        self.destroy()
         
     def restore_defaults(self):
         self.parent.self.status_db['audio_formats'] = ['.wav']
@@ -4442,7 +4584,7 @@ class McoFormatTracker(tk.Toplevel):
         except AttributeError:
             pass
         
-    def update_mco_format_list(self):
+    def update_current_list(self):
     
         #update list if anything added
         

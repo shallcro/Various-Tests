@@ -131,6 +131,9 @@ class BdplMainApp(tk.Tk):
         self.actions_.add_cascade(menu=self.connect, label = 'Connect to server...')
         self.connect.add_command(label = 'BDPL Workspace', command=lambda:self.connect_to_server('bdpl_workspace'))
         self.connect.add_command(label = 'BDPL Archiver', command=lambda:self.connect_to_server('bdpl_archiver'))
+        self.actions_.add_separator()
+        
+        self.actions_.add_command(label='Update BDPL scripts', command=self.update_scripts)
         
         self.help_ = tk.Menu(self.menubar)
         self.menubar.add_cascade(menu=self.help_, label='Help')
@@ -139,6 +142,18 @@ class BdplMainApp(tk.Tk):
     def get_current_tab(self):
         return self.bdpl_notebook.tab(self.bdpl_notebook.select(), 'text')
         
+    def update_scripts(self):
+        restart = messagebox.askyesno(title='Update BDPL Scripts', message='Updating scripts will close the BDPL app.  Continue?')
+        
+        if restart:
+            #run batch file to update git repos
+            #cmd = 'START CMD /C "C:/BDPL/scripts/update_BDPL_scripts.bat"'
+            cmd = 'START CMD /C "C:/BDPL/scripts-test/test.bat"'
+            subprocess.run(cmd, shell=True)
+            
+            #close app
+            #sys.exit(0)
+            
     def update_tab(self, event):
         event.widget.update_idletasks()
 
@@ -1027,7 +1042,7 @@ class McoDeposit(tk.Frame):
         '''
         CREATE FRAMES
         '''
-        tab_frames_list = [('connect_frame', 'Connect to MCO Dropbox'), ('batch_info_frame', 'Basic Information:'), ('collection_frame', 'Select MCO Collection:'), ('button_frame', 'MCO Deposit Actions:')]
+        tab_frames_list = [('batch_info_frame', 'Basic Information:'), ('collection_frame', 'Select MCO Collection:'), ('button_frame', 'MCO Deposit Actions:'), ('connect_frame', 'Connect to MCO Dropbox')]
 
         self.tab_frames_dict = {}
 
@@ -1042,7 +1057,7 @@ class McoDeposit(tk.Frame):
         self.connected_msg.set('Ingest Tool is NOT connected to {}'.format(self.controller.ip_addresses[2]))
         
         self.connect_label = ttk.Label(self.tab_frames_dict['connect_frame'], textvariable=self.connected_msg)
-        self.connect_label.grid(row=0, column=1, columnspan=2, padx=20, pady=10)
+        self.connect_label.grid(row=0, column=1, columnspan=2, padx=20, pady=2)
         
         self.connect_buttons = {}
         
@@ -1155,10 +1170,10 @@ class McoDeposit(tk.Frame):
             return
         
         #create batch object if it doesn't already exist
-        if not hasattr(self, 'mco_batch'):
-            self.mco_batch = McoBatchDeposit(self.controller)
+        mco_batch = McoBatchDeposit(self.controller)
         
-        self.mco_batch.update_mco_format_list()
+        #update date format list associated with the batch object for this shipment
+        mco_batch.update_mco_format_list()
         
     def prep_mco_deposit(self):
         
@@ -1168,9 +1183,11 @@ class McoDeposit(tk.Frame):
             print(msg)
             return
             
-        #create batch object if it doesn't already exist
-        if not hasattr(self, 'mco_batch'):
-            self.mco_batch = McoBatchDeposit(self.controller)
+        #create batch object
+        mco_batch = McoBatchDeposit(self.controller)
+        
+        #prep batches of content for MCO
+        mco_batch.prep_batches_for_mco()
         
     def move_to_mco_dropbox(self):
         
@@ -1180,15 +1197,19 @@ class McoDeposit(tk.Frame):
             print(msg)
             return
         
-        if self.mco_collection_name.get() == '':
-            
+        #make sure we have selected an MCO collection
+        if self.mco_collection_name.get() == '':   
             messagebox.showwarning(title='WARNING', message='Select MCO collection from dropdown menu before continuing.', master=self)
-            
             return
+        
         
         self.mco_destination = '{}/{}'.format(self.mco_dir, self.mco_collection_name.get())
         
-        print(self.mco_destination)
+        #create batch object
+        mco_batch = McoBatchDeposit(self.controller)
+        
+        #move batches to MCO dropbox
+        mco_batch.move_batches_to_mco(self.mco_destination)
     
 def close_app(window):
     window.destroy()
