@@ -276,9 +276,9 @@ class DigitalObject(Shipment):
                     self.current_dict[key] = shipment_spreadsheet.app_ws.cell(row=row, column=ws_columns[key]).value
         
         #add additional elements required for SDA deposit
-        if not self.current_dict.get['unit_name']:
+        if not self.current_dict.get('unit_name'):
             self.current_dict['unit_name'] = self.unit_name
-        if not self.current_dict.get['shipment_date']:
+        if not self.current_dict.get('shipment_date'):
             self.current_dict['unit_name'] = self.shipment_date
         
         #clean up any None values
@@ -334,6 +334,10 @@ class DigitalObject(Shipment):
     
     def verify_transfer_details(self):
 
+        #make sure directories have already been created (i.e., record was loaded)
+        if not os.path.exists(self.barcode_dir):
+            return (False, '\nWARNING: Load record before proceeding; directory structure has not been created.')
+            
         if self.controller.job_type.get() is None:
             return (False, '\nWARNING: Indicate the appropriate job type for this item and then run transfer again.')
             
@@ -2524,7 +2528,6 @@ class Spreadsheet(Shipment):
     def get_spreadsheet_columns(self, ws):
 
         spreadsheet_columns = {}
-
         for cell in ws[1]:
             if not cell.value is None:
                 if 'identifier' in str(cell.value).lower():
@@ -2573,9 +2576,13 @@ class Spreadsheet(Shipment):
                     spreadsheet_columns['migration_outcome'] = cell.column
                 elif 'extent (normalized)' in cell.value.lower():
                     spreadsheet_columns['extent_normal'] = cell.column
-                elif 'extent (raw)' or 'extracted files extent' in cell.value.lower():
+                elif 'extent (raw)' in cell.value.lower():
                     spreadsheet_columns['extent_raw'] = cell.column
-                elif 'no. of files' or 'extracted files number' in cell.value.lower():
+                elif 'extracted files extent' in cell.value.lower():
+                    spreadsheet_columns['extent_raw'] = cell.column
+                elif 'no. of files' in cell.value.lower():
+                    spreadsheet_columns['item_file_count'] = cell.column
+                elif 'extracted files number' in cell.value.lower():
                     spreadsheet_columns['item_file_count'] = cell.column
                 elif 'no. of duplicate files' in cell.value.lower():
                     spreadsheet_columns['item_duplicate_count'] = cell.column
@@ -2598,8 +2605,7 @@ class Spreadsheet(Shipment):
                 elif 'appraisal results' in cell.value.lower():
                     spreadsheet_columns['final_appraisal'] = cell.column
                 elif 'job type' in cell.value.lower():
-                    spreadsheet_columns['job_type'] = cell.column
-                    
+                    spreadsheet_columns['job_type'] = cell.column                
                 #additional elements for master_spreadsheet 'Item' sheet
                 elif 'sip creation date' in cell.value.lower():
                     spreadsheet_columns['sip_creation_date'] = cell.column
@@ -2608,8 +2614,7 @@ class Spreadsheet(Shipment):
                 elif 'sip md5' in cell.value.lower():
                     spreadsheet_columns['sip_md5'] = cell.column
                 elif 'sip filename' in cell.value.lower():
-                    spreadsheet_columns['sip_filename'] = cell.column
-                    
+                    spreadsheet_columns['sip_filename'] = cell.column                    
                 #additional elements for master_spreadsheet 'Cumulative'
                 elif 'sip count' in cell.value.lower():
                     spreadsheet_columns['sip_count'] = cell.column
@@ -2621,12 +2626,11 @@ class Spreadsheet(Shipment):
                     spreadsheet_columns['ingest_end_date'] = cell.column
                 elif 'ingest duration' in cell.value.lower():
                     spreadsheet_columns['ingest_duration'] = cell.column
-
         return spreadsheet_columns
         
     def write_to_spreadsheet(self, current_dict, ws=None):
     
-        if self.__class__.__name__ == 'Spreadsheet':
+        if ws is None:
             ws = self.app_ws
         
         current_row = self.return_row(ws)[1]
@@ -2634,8 +2638,9 @@ class Spreadsheet(Shipment):
         ws_cols = self.get_spreadsheet_columns(ws)
     
         for key in ws_cols.keys():
+            
             if key in current_dict:
-                self.ws.cell(row=current_row, column=ws_cols[key], value=current_dict[key])
+                ws.cell(row=current_row, column=ws_cols[key], value=current_dict[key])
 
         #save and close spreadsheet
         self.wb.save(self.spreadsheet) 
@@ -2700,10 +2705,10 @@ class MasterSpreadsheet(Spreadsheet):
             return (True, "Let's roll!")
         
 class McoSpreadsheet(Spreadsheet):
-    def __init__(self, controller, mco_batch):
+    def __init__(self, controller, parent):
         Spreadsheet.__init__(self, controller)
         self.controller = controller
-        self.parent = mco_batch
+        self.parent = parent
         
         self.spreadsheet = os.path.join(self.parent.mco_report_dir, '{}_{}_MCO_deposit_batch_{}.xlsx'.format(self.unit_name, self.shipment_date, str(self.parent.current_batch_no).zfill(2)))
         
@@ -2747,9 +2752,9 @@ class McoSpreadsheet(Spreadsheet):
         
         self.wb.save(self.spreadsheet)
         
-    def write_row(self, metadata):
+    def write_row(self, metadata_list):
         
-        self.mco_ws.append(metadata.values())
+        self.mco_ws.append(metadata_list)
         self.wb.save(self.spreadsheet)
 
 class ManualPremisEvent(tk.Toplevel):
@@ -4035,7 +4040,7 @@ class McoBatchDeposit(Shipment):
                 continue
 
             #set identifier variable
-            self.controller.identifier.set(barcode.strip())
+            self.controller.identifier.set(barcode.value.strip())
             
             #set up DigitalObject
             current_item = DigitalObject(self.controller)
@@ -4050,18 +4055,18 @@ class McoBatchDeposit(Shipment):
             current_item.load_item_metadata(self.shipment_spreadsheet)
             
             #skip if not designated for MCO
-            if not 'mco' in current_item.current_dict['final_appraisal']:
+            if not 'mco' in current_item.current_dict['final_appraisal'].lower():
                 print('\n\tDo not deposit to MCO')
                 continue
+            else:
+                print('\n\tPreparing for deposit to MCO...')
             
             #add identifier to our tracking lists
-            self.status_db['master_list'].append(current_item.identifer)
-            self.status_db['batch_info'][self.current_batch_no][current_item.identifer] = {}
+            self.status_db['master_list'].append(current_item.identifier)
+            self.status_db['batch_info'][self.current_batch_no][current_item.identifier] = {}
             
             #shorthand references for our status shelves
-            self.item_info = self.status_db['batch_info'][self.current_batch_no][current_item.identifer]
-            
-            self.current_batch_list = self.status_db['batch-list_{}'.format(str(self.current_batch_no).zfill(2))]
+            self.item_info = self.status_db['batch_info'][self.current_batch_no][current_item.identifier]
                         
             '''
             set metadata for item in MCO
@@ -4073,7 +4078,10 @@ class McoBatchDeposit(Shipment):
                 item_title = current_item.current_dict['label_transcription']
             
             #set item_description
-            item_description = current_item.current_dict['item_description']
+            if current_item.current_dict.get('item_description'):
+                item_description = current_item.current_dict['item_description']
+            else:
+                item_description = ''
             
             #set date_issued
             if current_item.current_dict.get('assigned_dates') and current_item.current_dict['assigned_dates'] not in ['', '-', 'N/A']:
@@ -4091,11 +4099,11 @@ class McoBatchDeposit(Shipment):
                 phys_descr = ''
             
             #assign values in item_info dict
-            self.item_info = {'BDPLID' : current_item.identifer, 
+            self.item_info = {'BDPLID' : current_item.identifier, 
                             'ID_Type_3' : 'BDPL ID', 
-                            'CollectionID' : current_item.current_dict.get('collection_id', current_item.current_dict['current_coll_id']),
+                            'CollectionID' : current_item.current_dict.get('collection_id', ''),
                             'ID_Type_1' : 'Collection ID',  
-                            'AccessionID' : current_item.current_dict.get('accession_number', current_item.current_dict['current_accession']), 
+                            'AccessionID' : current_item.current_dict.get('accession_number', ''), 
                             'ID_Type_2' : 'Accession ID', 
                             'Title' : item_title, 
                             'Creator' : current_item.current_dict['collection_creator'], 
@@ -4149,7 +4157,7 @@ class McoBatchDeposit(Shipment):
                     
                     mco_file_path_for_spreadsheet = os.path.relpath(mco_file_full_path, self.ship_dir).replace(os.sep, os.altsep)
                     
-                    print('\nWorking on {}'.format(mco_file))
+                    print('\n\t\tWorking on {}'.format(mco_file))
                     
                     #assign File & Label values in mco metadata dictionary
                     self.item_info['File_{}'.format(i)] = mco_file_path_for_spreadsheet
@@ -4161,14 +4169,11 @@ class McoBatchDeposit(Shipment):
                     #if we exceed current # of 'File'/'Label' fields in the spreadsheet, we need to add a new one
                     if i+1 > len(column_count):
                         self.current_manifest.add_columns(column_count)
-                        
-                    #add file to our copy list
-                    self.current_batch_list.append(mco_file_full_path)
                     
                     #for audio files with CUE: create structure.xml file
                     if label == 'CD':
                         #cue file should have same base filename as associated wav: match 'em up!
-                        found_cue = [c for c in cue_file_list if os.path.splitext(c)[0] == os.path.splitext(mco_file)[0]]
+                        found_cue = [c for c in self.status_db['cue_file_list'] if os.path.splitext(c)[0] == os.path.splitext(mco_file)[0]]
                         
                         #if we've found a wav_cue_file file, convert to structure.xml
                         if found_cue:
@@ -4179,7 +4184,7 @@ class McoBatchDeposit(Shipment):
                             
                             cue_file = os.path.join(current_item.files_dir, found_cue[0])
                     
-                            print('\tCreating structure.xml file for audio...', cue_file)
+                            print('\n\t\tCreating structure.xml file for audio...', cue_file)
                             
                             #get info from wav_cue_file file.  NOTE: old procedures resulted in an encoding issue and do not reference the WAV file; let's try to fix those!
                             while True:
@@ -4223,7 +4228,7 @@ class McoBatchDeposit(Shipment):
                                 if times[i] == times[-1]:
                                     track_info[tracks[i]] = {'begin':begin_time}
                                 else:
-                                    end_time = calc_end_time(times[i+1])
+                                    end_time = self.calc_end_time(times[i+1])
                                     
                                     track_info[tracks[i]] = {'begin' : begin_time, 'end' : end_time}
                                     
@@ -4246,11 +4251,21 @@ class McoBatchDeposit(Shipment):
                             structure_tree = etree.ElementTree(item)
                             structure_tree.write(structure_xml, pretty_print=True)
                             
-                            #write file to copy list
-                            self.current_batch_list.append(structure_xml)
-            
+                            #add our audio file AND structure_xml file as a list to our batch_list
+                            self.current_batch_list.append([mco_file_full_path, structure_xml])
+                        
+                        #if there's no associated cue file, just add audio file to our batch list
+                        else:
+                            #add file to our copy list
+                            self.current_batch_list.append(mco_file_full_path)
+                    
+                    #if not an audio file, go ahead and add filename to our batch list
+                    else:
+                        #add file to our copy list
+                        self.current_batch_list.append(mco_file_full_path)
+                        
             #save info to manifest
-            self.current_manifest.write_row(self.item_info)
+            self.current_manifest.write_row(list(self.item_info.values()))
             
         print('\n\n----------------------------------------------------------------------------------------------------\n\nMCO preparation complete. Run "move" operation after review of MCO spreadsheet(s).')
         
@@ -4297,29 +4312,39 @@ class McoBatchDeposit(Shipment):
             for line in cue_info:
                 outfile.write(line)                        
                     
-    def new_batch(self):
-        #reset variables
-        self.current_batch_no += 1
+    def new_batch(self, batch_no=None):
         
-        #set up batch_info
+        #when prepping batches, no batch number is provided to this method.  Add 1 to the current batch number.
+        if batch_no is None:
+            self.current_batch_no += 1
+        #when moving batches, we include a batch number in the call to this method.  Set current batch number to this #
+        else:
+            self.current_batch_no = batch_no
+        
+        #set up batch_info shelve
         if not self.status_db['batch_info'].get(self.current_batch_no):
             self.status_db['batch_info'][self.current_batch_no] = {}
         
-        #set up list to track files
+        #set up list to track files in the current batch
         if not self.status_db.get('batch-list_{}'.format(str(self.current_batch_no).zfill(2))):
             self.status_db['batch-list_{}'.format(str(self.current_batch_no).zfill(2))] =[]
         
-        #set up new manifest
+        self.current_batch_list = self.status_db['batch-list_{}'.format(str(self.current_batch_no).zfill(2))]
+        
+        #create manifest oject; set up spreadsheet if it doesn't already exist
         self.current_manifest = McoSpreadsheet(self.controller, self)
-        self.current_manifest.set_up_manifest()
+        
+        if not os.path.exists(self.current_manifest.spreadsheet):
+            self.current_manifest.set_up_manifest()
         
     def update_mco_format_list(self):
         
         #generate Toplevel widget to allow user to make selections about what formats will be included
         McoFormatTracker(self, self.controller)
        
-    def select_batch_to_mco(self, mco_destination):
-        self.mco_destination = mco_destination      
+    def select_batch_for_mco(self, mco_destination, mco_client):
+        self.mco_destination = mco_destination    
+        self.mco_client = mco_client
         
         #set up list to track our batches
         if not self.status_db.get('moved_batches'):
@@ -4343,16 +4368,81 @@ class McoBatchDeposit(Shipment):
             messagebox.showwarning(title='WARNING', message='No batches have been prepared for this shipment.', master=self)
             return
             
-    def move_batch(self, batch):
-    
+    def move_batch(self, batch_no):
+        
         if batch == '':
             messagebox.showwarning(title='WARNING', message='Select a batch from this shipment to move to the MCO dropbox', master=self)
             return
+        else:
+            #set up our batch resources: assign variables to current_batch_list and MCO manifest
+            self.new_batch(batch_no)
             
-        #set up resources
-        batch_list = self.status_db['batch-list_{}'.format(str(batch).zfill(2))]
+        print('\nMoving files (batch {}) to {}...'.format(self.current_batch_no, self.mco_destination))
+            
+        #set up a list to track any failed operations
+        if not self.status_db.get('failed_{}'.format(str(self.current_batch_no).zfill(2))):
+            self.status_db['failed_{}'.format(str(self.current_batch_no).zfill(2))] = []
         
-        ###CAN WE USE THE new_batch METHOD HERE?  MAY NEED TO CHANGE HOW WE PASS CURRENT_BATCH_NO...
+        self.failed_list = self.status_db['failed_{}'.format(str(self.current_batch_no).zfill(2))]
+        
+        #now loop through our list of files and copy to MCO destination
+        for file in self.current_batch_list:
+            
+            #check to see if this is a list, which will consist of wav and structure_xml files
+            if isinstance(file, list):
+                #copy wav file
+                self.copy_content(file[0])
+                
+                #copy structure_xml file
+                self.copy_content(file[1], file[0])
+            
+            else:
+                self.copy_content(file)
+        
+        #if no failures, copy over our manifest
+        if len(self.failed_list) == 0:
+            mco_file = '{}/{}'.format(self.mco_destination, os.path.basename(self.current_manifest.spreadsheet))
+            
+            self.mco_client.sftp.put(self.current_manifest.spreadsheet, mco_file)
+            
+            #update status of batch
+            self.status_db['moved_batches'].append(self.current_batch_no)
+            
+            messagebox.showinfo(title='Batch Complete', message='Batch {} has been successfully moved.  Move next batch after this one has completed MCO ingest.')
+        
+        else:
+            if len(self.failed_list) == 1:
+                fail_message = '1 file'
+            else:
+                fail_message = '{} files'.format(len(self.failed_list))
+                
+            messagebox.showwarning(title='Batch Failed', message='{} failed to copy to the MCO dropbox. Make sure content is in shipment directory and try again.'.format(fail_message))         
+    
+    def copy_content(self, file, parent_audio=None):
+        #get path where file will be copied in MCO destination
+        
+        if parent_audio is None:
+            dir_path = os.path.relpath(os.path.dirname(file), ship_dir).replace(os.sep, os.altsep)
+        #if parent_audio is provided, we will use the relative path to that file to set up our MCO destination
+        else:
+            dir_path = os.path.relpath(os.path.dirname(parent_audio), ship_dir).replace(os.sep, os.altsep)
+              
+        #set up destination filename
+        mco_dir = '{}/{}'.format(self.mco_destination, dir_path)
+        mco_file = '{}/{}'.format(mco_dir, os.path.basename(file))
+        
+        #make needed folders in mco dropbox
+        self.mco_client.make_dirs(mco_dir)
+        
+        print('\nMoving file {}'.format(file))
+        
+        #copy file to destination; note failure upon exception
+        try:
+            self.mco_client.sftp.put(file, mco_file)
+            print('\n\tSuccess!')
+        except:
+            self.failed_list.append(file)
+            print('\n\tOperation failed :(')
 
 class McoBatchPicker(tk.Toplevel):
     def __init__(self, parent, controller):
@@ -4424,7 +4514,7 @@ class McoBatchPicker(tk.Toplevel):
         
         #create headers
         c = 1
-        for label_ in ['Batch #:', 'Status:']
+        for label_ in ['Batch #:', 'Status:']:
             ttk.Label(self.current_batch_frame, text=label_).grid(row=1, column=c, padx=10, pady=2)
             c+=1
         

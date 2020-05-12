@@ -231,10 +231,13 @@ class BdplMainApp(tk.Tk):
         for line in drive_list:
             if not line.startswith('OK'):
                 continue
-            if ip_address == line.split()[2]:
-                mapped_drive = line.split()[1]
-                found = True
-                break
+            try:
+                if ip_address == line.split()[2]:
+                    mapped_drive = line.split()[1]
+                    found = True
+                    break
+            except IndexError:
+                continue
             
         if not found: 
             if self.checked_servers['{}_first_time'.format(servername)]:
@@ -470,7 +473,7 @@ class McoConnect(ServerConnect):
         self.destroy()
         
 class McoSftpClient:
-    def __init__(self, controller, username, password, mco_server, mco_dir):
+    def __init__(self, controller, username, password, host, mco_dir):
         self.controller = controller
         self.host = mco_server 
         self.username = username
@@ -1115,7 +1118,7 @@ class McoDeposit(tk.Frame):
         button_id['Settings'].config(command=self.adjust_format_list)
         button_id['Prep Deposit'].config(command=self.prep_mco_deposit)
         button_id['Move to MCO'].config(command=self.move_to_mco_dropbox)
-        button_id['Quit'].config(command = lambda: close_app(self.controller))
+        button_id['Quit'].config(command=self.close_mco)
     
     def connect_to_mco(self):
         #create TopLevel to get username/password
@@ -1148,7 +1151,12 @@ class McoDeposit(tk.Frame):
         
         #add values to MCO collection combobox
         self.mco_combobox['values'] = self.mco_client.get_collection_list()
-            
+    
+    def close_mco(self):
+        self.disconnect_mco_dropbox()
+        
+        close_app(self.controller)
+    
     def disconnect_mco_dropbox(self):
         try: 
             #close sftp client/transport
@@ -1209,7 +1217,7 @@ class McoDeposit(tk.Frame):
         mco_batch = McoBatchDeposit(self.controller)
         
         #move batches to MCO dropbox
-        mco_batch.move_batches_to_mco(self.mco_destination)
+        mco_batch.select_batch_for_mco(self.mco_destination, self.mco_client)
     
 def close_app(window):
     window.destroy()
