@@ -515,7 +515,7 @@ class DigitalObject(Shipment):
             if os.stat(imagefile).st_size > 0:
                 exitcode = 0
             else:
-                print('\n\nWARNING: Disk image not successfully created. Verify you have selected the correct disk type and try again (if possible).  Otherwise, indicate issues in note to collecting unit.')
+                messagebox.showwarning(title='WARNING', message='Disk image not successfully created. Verify you have selected the correct disk type and try again (if possible).  Otherwise, indicate issues in note to collecting unit.', master=self)
                 return
         
         #record event in PREMIS metadata
@@ -948,7 +948,7 @@ class DigitalObject(Shipment):
             tree.write(self.dfxml_output, pretty_print=True, xml_declaration=True, encoding="utf-8")      
         
         else:
-            print('\n\tERROR: {} does not appear to exist...'.format(target))
+            messagebox.showwarning(title='WARNING', message='{} does not appear to exist...'.format(target), master=self)
             return
         
         #save stats for reporting...            
@@ -1108,7 +1108,7 @@ class DigitalObject(Shipment):
                         pass
                 
                 if len(audio_test) == 0:
-                    print('\nWARNING: unable to access information on DVD. Moving image normalization has failed...')
+                    messagebox.showwarning(title='WARNING', message='Unable to access information on DVD. Moving image normalization has failed...', master=self)
                     return
                 
                 #if there's no audio in any track, it's OK
@@ -2315,14 +2315,14 @@ class DigitalObject(Shipment):
             
             #make surre this isn't PAL formatted: need to figure out solution. 
             if title_format == 'PAL':
-                print('\n\nWARNING: DVD is PAL formatted! Notify digital preservation librarian so we can configure approprioate ffmpeg command; set disc aside for now...')
+                messagebox.showwarning(title='WARNING', message='DVD is PAL formatted! Notify digital preservation librarian so we can configure approprioate ffmpeg command; set disc aside for now...', master=self)
                 return
             
             #if DVD has one or more titles, rip raw streams to .MPG
             if titlecount > 0:
                 self.normalize_dvd_content(titlecount, drive_letter)
             else:
-                print('\nWARNING: DVD does not appear to have any titles; job type should likely be Disk_image.  Manually review disc and re-transfer content if necessary.')
+                messagebox.showwarning(title='WARNING', message='DVD does not appear to have any titles; job type should likely be Disk_image.  Manually review disc and re-transfer content if necessary.', master=self)
                 return
         
         #CDDA job
@@ -2410,7 +2410,7 @@ class DigitalObject(Shipment):
         shipment_spreadsheet = Spreadsheet(self.controller)
         
         if shipment_spreadsheet.already_open():
-            print('\n\nWARNING: {} is currently open.  Close file before continuing and/or contact digital preservation librarian if other users are involved.'.format(shipment_spreadsheet.spreadsheet))
+            messagebox.showwarning(title='WARNING', message='{} is currently open.  Close file before continuing and/or contact digital preservation librarian if other users are involved.'.format(shipment_spreadsheet.spreadsheet), master=self)
             return
         
         shipment_spreadsheet.open_wb()
@@ -2655,7 +2655,7 @@ class Spreadsheet(Shipment):
         #verify spreadsheet--make sure we only have 1 & that it follows naming conventions
         status, msg = self.verify_spreadsheet()
         if not status:
-            print(msg)
+            messagebox.showwarning(title='WARNING', message=msg, master=self)
             return
         
         self.open_wb()
@@ -2769,7 +2769,7 @@ class ManualPremisEvent(tk.Toplevel):
         
         status, msg = self.controller.check_main_vars()
         if not status:
-            print(msg)
+            messagebox.showwarning(title='WARNING', message=msg, master=self)
             self.close_top
             return
         
@@ -2853,7 +2853,7 @@ class ManualPremisEvent(tk.Toplevel):
     
     def add_barcode_value(self):
         if self.barcode_entry.get() == '':
-            print('\n\nWARNING: Be sure to enter a barcode value')
+            messagebox.showwarning(title='WARNING', message='Be sure to enter a barcode value', master=self)
             return
         else:
             self.controller.identifier.set(self.barcode_entry.get().trim())
@@ -2862,7 +2862,7 @@ class ManualPremisEvent(tk.Toplevel):
         shipment_spreadsheet.open_wb()
         
         if not shipment_spreadsheet.return_row(shipment_spreadsheet.inv_ws)[0]:
-            print('\n\nWARNING: Barcode value does not appear in spreadsheet')
+            messagebox.showwarning(title='WARNING', message='Barcode value does not appear in spreadsheet', master=self)
             return
         else:
             self.get_info_frame.destroy()
@@ -3987,7 +3987,7 @@ class McoBatchDeposit(Shipment):
         self.controller = controller
         
         #set # of items that will be included per batch. 
-        self.batch_size = 50
+        self.batch_size = 2
         
         #set up temp folder and shelve
         self.mco_report_dir = os.path.join(self.ship_dir, 'mco_reports')
@@ -4063,10 +4063,9 @@ class McoBatchDeposit(Shipment):
             
             #add identifier to our tracking lists
             self.status_db['master_list'].append(current_item.identifier)
-            self.status_db['batch_info'][self.current_batch_no][current_item.identifier] = {}
             
-            #shorthand references for our status shelves
-            self.item_info = self.status_db['batch_info'][self.current_batch_no][current_item.identifier]
+            #set up a temp dict to store info
+            self.item_info = {}
                         
             '''
             set metadata for item in MCO
@@ -4117,6 +4116,8 @@ class McoBatchDeposit(Shipment):
                 if v in ['-', 'N/A', ' ']:
                     self.item_info[k] = ''
             
+            #save info
+            self.status_db['batch_info'][self.current_batch_no][current_item.identifier] = self.item_info
             self.status_db.sync()
                     
             '''
@@ -4252,17 +4253,17 @@ class McoBatchDeposit(Shipment):
                             structure_tree.write(structure_xml, pretty_print=True)
                             
                             #add our audio file AND structure_xml file as a list to our batch_list
-                            self.current_batch_list.append([mco_file_full_path, structure_xml])
+                            self.status_db[self.current_batch_list].append([mco_file_full_path, structure_xml])
                         
                         #if there's no associated cue file, just add audio file to our batch list
                         else:
                             #add file to our copy list
-                            self.current_batch_list.append(mco_file_full_path)
+                            self.status_db[self.current_batch_list].append(mco_file_full_path)
                     
                     #if not an audio file, go ahead and add filename to our batch list
                     else:
                         #add file to our copy list
-                        self.current_batch_list.append(mco_file_full_path)
+                        self.status_db[self.current_batch_list].append(mco_file_full_path)
                         
             #save info to manifest
             self.current_manifest.write_row(list(self.item_info.values()))
@@ -4317,19 +4318,24 @@ class McoBatchDeposit(Shipment):
         #when prepping batches, no batch number is provided to this method.  Add 1 to the current batch number.
         if batch_no is None:
             self.current_batch_no += 1
+        
         #when moving batches, we include a batch number in the call to this method.  Set current batch number to this #
         else:
             self.current_batch_no = batch_no
         
         #set up batch_info shelve
-        if not self.status_db['batch_info'].get(self.current_batch_no):
+        if not self.current_batch_no in self.status_db['batch_info'].keys():
             self.status_db['batch_info'][self.current_batch_no] = {}
         
         #set up list to track files in the current batch
-        if not self.status_db.get('batch-list_{}'.format(str(self.current_batch_no).zfill(2))):
-            self.status_db['batch-list_{}'.format(str(self.current_batch_no).zfill(2))] =[]
-        
-        self.current_batch_list = self.status_db['batch-list_{}'.format(str(self.current_batch_no).zfill(2))]
+        self.current_batch_list = 'batch-list_{}'.format(str(self.current_batch_no).zfill(2))
+        if not self.current_batch_list in self.status_db.keys():
+            self.status_db[self.current_batch_list] =[]
+            
+        #set up a list to track any failed operations
+        self.failed_list = 'failed_{}'.format(str(self.current_batch_no).zfill(2))
+        if not self.status_db.get(self.failed_list):
+            self.status_db[self.failed_list] = []
         
         #create manifest oject; set up spreadsheet if it doesn't already exist
         self.current_manifest = McoSpreadsheet(self.controller, self)
@@ -4351,7 +4357,7 @@ class McoBatchDeposit(Shipment):
             self.status_db['moved_batches'] = []
         
         #get info about batches
-        self.batches = list(self.parent.status_db['batch_info'].keys())
+        self.batches = list(self.status_db['batch_info'].keys())
         
         if len(self.batches) == 1:
             batch = self.batches[0]
@@ -4370,7 +4376,7 @@ class McoBatchDeposit(Shipment):
             
     def move_batch(self, batch_no):
         
-        if batch == '':
+        if batch_no == '':
             messagebox.showwarning(title='WARNING', message='Select a batch from this shipment to move to the MCO dropbox', master=self)
             return
         else:
@@ -4378,15 +4384,9 @@ class McoBatchDeposit(Shipment):
             self.new_batch(batch_no)
             
         print('\nMoving files (batch {}) to {}...'.format(self.current_batch_no, self.mco_destination))
-            
-        #set up a list to track any failed operations
-        if not self.status_db.get('failed_{}'.format(str(self.current_batch_no).zfill(2))):
-            self.status_db['failed_{}'.format(str(self.current_batch_no).zfill(2))] = []
-        
-        self.failed_list = self.status_db['failed_{}'.format(str(self.current_batch_no).zfill(2))]
         
         #now loop through our list of files and copy to MCO destination
-        for file in self.current_batch_list:
+        for file in self.status_db[self.current_batch_list]:
             
             #check to see if this is a list, which will consist of wav and structure_xml files
             if isinstance(file, list):
@@ -4400,21 +4400,22 @@ class McoBatchDeposit(Shipment):
                 self.copy_content(file)
         
         #if no failures, copy over our manifest
-        if len(self.failed_list) == 0:
+        if len(self.status_db[self.failed_list]) == 0:
             mco_file = '{}/{}'.format(self.mco_destination, os.path.basename(self.current_manifest.spreadsheet))
             
             self.mco_client.sftp.put(self.current_manifest.spreadsheet, mco_file)
             
             #update status of batch
             self.status_db['moved_batches'].append(self.current_batch_no)
+            self.status_db.sync()
             
-            messagebox.showinfo(title='Batch Complete', message='Batch {} has been successfully moved.  Move next batch after this one has completed MCO ingest.')
+            messagebox.showinfo(title='Batch Complete', message='Batch {} has been successfully moved.  Move next batch after this one has completed MCO ingest.'.format(self.current_batch_no))
         
         else:
-            if len(self.failed_list) == 1:
+            if len(self.status_db[self.failed_list]) == 1:
                 fail_message = '1 file'
             else:
-                fail_message = '{} files'.format(len(self.failed_list))
+                fail_message = '{} files'.format(len(self.status_db[self.failed_list]))
                 
             messagebox.showwarning(title='Batch Failed', message='{} failed to copy to the MCO dropbox. Make sure content is in shipment directory and try again.'.format(fail_message))         
     
@@ -4422,10 +4423,10 @@ class McoBatchDeposit(Shipment):
         #get path where file will be copied in MCO destination
         
         if parent_audio is None:
-            dir_path = os.path.relpath(os.path.dirname(file), ship_dir).replace(os.sep, os.altsep)
+            dir_path = os.path.relpath(os.path.dirname(file), self.ship_dir).replace(os.sep, os.altsep)
         #if parent_audio is provided, we will use the relative path to that file to set up our MCO destination
         else:
-            dir_path = os.path.relpath(os.path.dirname(parent_audio), ship_dir).replace(os.sep, os.altsep)
+            dir_path = os.path.relpath(os.path.dirname(parent_audio), self.ship_dir).replace(os.sep, os.altsep)
               
         #set up destination filename
         mco_dir = '{}/{}'.format(self.mco_destination, dir_path)
@@ -4434,15 +4435,15 @@ class McoBatchDeposit(Shipment):
         #make needed folders in mco dropbox
         self.mco_client.make_dirs(mco_dir)
         
-        print('\nMoving file {}'.format(file))
+        print('\n\t{}'.format(file), end='')
         
         #copy file to destination; note failure upon exception
         try:
             self.mco_client.sftp.put(file, mco_file)
-            print('\n\tSuccess!')
+            print(' ... Success!')
         except:
-            self.failed_list.append(file)
-            print('\n\tOperation failed :(')
+            self.status_db[self.failed_list].append(file)
+            print(' ... Operation failed :(')
 
 class McoBatchPicker(tk.Toplevel):
     def __init__(self, parent, controller):
@@ -4455,9 +4456,7 @@ class McoBatchPicker(tk.Toplevel):
         self.parent = parent     
         self.batches = self.parent.batches
         
- 
-        
-        self.selected_batch = StringVar()
+        self.selected_batch = tk.StringVar()
         self.selected_batch.set('')
         
         tab_frames_list = [('batch_frame', 'MCO Batches in Current Shipment:'), ('button_frame', 'Actions:')]
@@ -4492,9 +4491,18 @@ class McoBatchPicker(tk.Toplevel):
         self.tab_frames_dict['button_frame'].grid_columnconfigure(0, weight=1)
         self.tab_frames_dict['button_frame'].grid_columnconfigure(2, weight=1)
         
-        self.button_id['Move Batch'].config(command=lambda:self.parent.move_batch(batch))
+        self.button_id['Move Batch'].config(command=self.launch_move)
         
         self.button_id['Close'].config(command=self.close_top)
+    
+    def launch_move(self):
+    
+        #move selected batch
+        self.parent.move_batch(int(self.selected_batch.get()))
+        
+        #update window
+        self.update_batch_info()
+        
     
     def update_batch_info(self):
     
@@ -4514,11 +4522,11 @@ class McoBatchPicker(tk.Toplevel):
         
         #create headers
         c = 1
-        for label_ in ['Batch #:', 'Status:']:
+        for label_ in ['Batch #:', 'Options:']:
             ttk.Label(self.current_batch_frame, text=label_).grid(row=1, column=c, padx=10, pady=2)
             c+=1
         
-        #list batches and status
+        #list batches and options
         r=2
         for batch in self.batches:
             ttk.Label(self.current_batch_frame, text=str(batch).zfill(2)).grid(row=r, column=1, padx=10, pady=2)

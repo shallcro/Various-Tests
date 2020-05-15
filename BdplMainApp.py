@@ -259,7 +259,7 @@ class BdplMainApp(tk.Tk):
         #make sure main variables--unit_name, shipment_date, and barcode--are included.  Return if either is missing
         status, msg = self.check_main_vars()
         if not status:
-            print(msg)
+            messagebox.showwarning(title='WARNING', message=msg, master=self)
             return
 
         #create a manual PREMIS object
@@ -447,7 +447,7 @@ class ServerConnect(tk.Toplevel):
                 self.controller.tabs['SdaDeposit'].archiver_combobox.current(targets.index('general%2fmediaimages'))
                 
         else:
-            messagebox.showerror(title='ERROR', message='Failed to connect to {}:\n\n{}'.format(self.server.get(), p.stderr), master=self)   
+            messagebox.showwarning(title='WARNING', message='Failed to connect to {}:\n\n{}'.format(self.server.get(), p.stderr), master=self)   
     
     def close_top(self):
         
@@ -475,7 +475,7 @@ class McoConnect(ServerConnect):
 class McoSftpClient:
     def __init__(self, controller, username, password, host, mco_dir):
         self.controller = controller
-        self.host = mco_server 
+        self.host = host 
         self.username = username
         self.password = password
         self.port = 22
@@ -485,13 +485,13 @@ class McoSftpClient:
         try:
             self.transport = paramiko.Transport((self.host, self.port))
         except socket.gaierror as e:
-            print('\n\nWARNING: unable to connect to MCO dropbox ({}).'.format(e))
+            messagebox.showwarning(title='WARNING', message='Unable to connect to MCO dropbox ({}).'.format(e), master=self)
             return
         
         try:
             self.transport.connect(None, self.username, self.password)
         except paramiko.ssh_exception.AuthenticationException as e:
-            print('\n\nWARNING: Authentication issue.  Check username / password and try again.')
+            messagebox.showwarning(title='WARNING', message='Authentication issue.  Check username / password and try again.', master=self)
             return
             
         self.sftp = paramiko.SFTPClient.from_transport(self.transport)
@@ -696,7 +696,7 @@ class BdplIngest(tk.Frame):
         #make sure main variables--unit_name, shipment_date, and barcode--are included.  Return if either is missing
         status, msg = self.controller.check_main_vars()
         if not status:
-            print(msg)
+            messagebox.showwarning(title='WARNING', message=msg, master=self)
             return
 
         #create a barcode object and a spreadsheet object
@@ -704,7 +704,7 @@ class BdplIngest(tk.Frame):
         
         status, msg = current_item.prep_barcode()
         if not status:
-            print(msg)
+            messagebox.showwarning(title='WARNING', message=msg, master=self)
             return
             
         #check status
@@ -722,7 +722,7 @@ class BdplIngest(tk.Frame):
         #make sure transfer details have been correctly entered
         status, msg = current_item.verify_transfer_details()
         if not status:
-            print(msg)
+            messagebox.showwarning(title='WARNING', message=msg, master=self)
             return
         
         current_item.run_item_transfer()
@@ -737,7 +737,7 @@ class BdplIngest(tk.Frame):
         #make sure transfer details have been correctly entered
         status, msg = current_item.verify_analysis_details()
         if not status:
-            print(msg)
+            messagebox.showwarning(title='WARNING', message=msg, master=self)
             return
             
         #run analysis on item
@@ -748,7 +748,7 @@ class BdplIngest(tk.Frame):
         #make sure main variables--unit_name, shipment_date, and barcode--are included.  Return if either is missing
         status, msg = self.controller.check_main_vars()
         if not status:
-            print(msg)
+            messagebox.showwarning(title='WARNING', message=msg, master=self)
             return
         
         #create a barcode object and a spreadsheet object
@@ -771,7 +771,7 @@ class BdplIngest(tk.Frame):
         #write info to spreadsheet.  Create a spreadsheet object, make sure spreadsheet isn't already open, and if OK, proceed to open and write info.
         shipment_spreadsheet = Spreadsheet(self.controller)
         if shipment_spreadsheet.already_open():
-            print('\n\nWARNING: {} is currently open.  Close file before continuing and/or contact digital preservation librarian if other users are involved.'.format(shipment_spreadsheet.spreadsheet))
+            messagebox.showwarning(title='WARNING', message='{} is currently open.  Close file before continuing and/or contact digital preservation librarian if other users are involved.'.format(shipment_spreadsheet.spreadsheet), master=self)
             return
             
         shipment_spreadsheet.open_wb()
@@ -895,13 +895,13 @@ class RipstationIngest(tk.Frame):
         #must check variables before we create a batch object
         status, msg = self.controller.check_main_vars()
         if not status:
-            print(msg)
+            messagebox.showwarning(title='WARNING', message=msg, master=self)
             return
         
         #make sure we have our shipment spreadsheet
         status, msg = Shipment(self.controller).verify_spreadsheet
         if not status:
-            print(msg)
+            messagebox.showwarning(title='WARNING', message=msg, master=self)
             return
         
         #set up Batch object, create folder
@@ -1001,7 +1001,7 @@ class SdaDeposit(tk.Frame):
     def separations_browse(self):
         status, msg = self.controller.check_main_vars()
         if not status:
-            print(msg)
+            messagebox.showwarning(title='WARNING', message=msg, master=self)
             return
         
         current_shipment = Shipment(self.controller)
@@ -1021,7 +1021,7 @@ class SdaDeposit(tk.Frame):
         
         status, msg = current_sda_batch.prep_sda_batch()
         if not status:
-            print(msg)
+            messagebox.showwarning(title='WARNING', message=msg, master=self)
             return
             
         current_sda_batch.deposit_barcodes_to_sda()
@@ -1174,7 +1174,7 @@ class McoDeposit(tk.Frame):
         #make sure variables have been entered
         status, msg = self.controller.check_main_vars()
         if not status:
-            print(msg)
+            messagebox.showwarning(title='WARNING', message=msg, master=self)
             return
         
         #create batch object if it doesn't already exist
@@ -1188,9 +1188,12 @@ class McoDeposit(tk.Frame):
         #make sure variables have been entered
         status, msg = self.controller.check_main_vars()
         if not status:
-            print(msg)
+            messagebox.showwarning(title='WARNING', message=msg, master=self)
             return
-            
+        
+        newscreen()
+        print('\n\nPREPARING CONTENT FOR MCO DEPOSIT...')
+        
         #create batch object
         mco_batch = McoBatchDeposit(self.controller)
         
@@ -1202,14 +1205,16 @@ class McoDeposit(tk.Frame):
         #make sure variables have been entered
         status, msg = self.controller.check_main_vars()
         if not status:
-            print(msg)
+            messagebox.showwarning(title='WARNING', message=msg, master=self)
             return
         
         #make sure we have selected an MCO collection
         if self.mco_collection_name.get() == '':   
             messagebox.showwarning(title='WARNING', message='Select MCO collection from dropdown menu before continuing.', master=self)
-            return
-        
+            return   
+
+        newscreen()
+        print('\n\nMOVING CONTENT TO MCO DROPBOX...')
         
         self.mco_destination = '{}/{}'.format(self.mco_dir, self.mco_collection_name.get())
         
