@@ -4013,17 +4013,22 @@ class McoBatchDeposit(Shipment):
     def prep_batches_for_mco(self):
         
         #set up resources to track progress
-        if not self.status_db.get('master_list'):
+        if not 'master_list' in list(self.status_db.keys()):
             self.status_db['master_list'] = []
             
-        if not self.status_db.get('batch_info'):
+        if not 'batch_info' in list(self.status_db.keys()):
             self.status_db['batch_info'] = {}
             self.current_batch_no = 0
             #since this is the first time through, set up new_batch resources
             self.new_batch()
             
         else:
-            self.current_batch_no = max(1, len(self.status_db['batch_info']))            
+            self.current_batch_no = max(1, len(self.status_db['batch_info']))     
+
+            self.current_batch_list = 'batch-list_{}'.format(str(self.current_batch_no).zfill(2))
+            
+            if not self.current_batch_list in list(self.status_db.keys()):
+                self.status_db[self.current_batch_list] =[]
         
             #manifest and other items should have already been set up; call it up
             self.current_manifest = McoSpreadsheet(self.controller, self)
@@ -4324,12 +4329,12 @@ class McoBatchDeposit(Shipment):
             self.current_batch_no = batch_no
         
         #set up batch_info shelve
-        if not self.current_batch_no in self.status_db['batch_info'].keys():
+        if not self.current_batch_no in list(self.status_db['batch_info'].keys()):
             self.status_db['batch_info'][self.current_batch_no] = {}
         
         #set up list to track files in the current batch
         self.current_batch_list = 'batch-list_{}'.format(str(self.current_batch_no).zfill(2))
-        if not self.current_batch_list in self.status_db.keys():
+        if not self.current_batch_list in list(self.status_db.keys()):
             self.status_db[self.current_batch_list] =[]
             
         #set up a list to track any failed operations
