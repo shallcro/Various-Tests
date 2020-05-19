@@ -4076,7 +4076,7 @@ class McoBatchDeposit(Shipment):
             set metadata for item in MCO
             '''
             #set item_title
-            if current_item.current_dict.get('item_title') and current_item.current_dict['item_title'] not in ['', '-', 'N/A']:
+            if current_item.current_dict.get('item_title') and current_item.current_dict['item_title'].lower() not in ['', '-', 'n/a']:
                 item_title = current_item.current_dict['item_title']
             else:
                 item_title = current_item.current_dict['label_transcription']
@@ -4088,7 +4088,7 @@ class McoBatchDeposit(Shipment):
                 item_description = ''
             
             #set date_issued
-            if current_item.current_dict.get('assigned_dates') and current_item.current_dict['assigned_dates'] not in ['', '-', 'N/A']:
+            if current_item.current_dict.get('assigned_dates') and current_item.current_dict['assigned_dates'].lower() not in ['', '-', 'n/a']:
                 date_issued = current_item.current_dict['assigned_dates'].replace(' ', '').replace('-', '/')
             else:
                 if current_item.current_dict['begin_date'] == current_item.current_dict['end_date']:
@@ -4118,7 +4118,7 @@ class McoBatchDeposit(Shipment):
             
             #try to clear out any bad data
             for k, v in self.item_info.items():
-                if v in ['-', 'N/A', ' ']:
+                if v.lower() in ['-', 'n/a', ' ']:
                     self.item_info[k] = ''
             
             #save info
