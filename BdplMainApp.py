@@ -147,12 +147,11 @@ class BdplMainApp(tk.Tk):
         
         if restart:
             #run batch file to update git repos
-            #cmd = 'START CMD /C "C:/BDPL/scripts/update_BDPL_scripts.bat"'
-            cmd = 'START CMD /C "C:/BDPL/scripts-test/test.bat"'
+            cmd = 'START CMD /C "C:/BDPL/scripts/update_BDPL_scripts.bat"'
             subprocess.run(cmd, shell=True)
             
             #close app
-            #sys.exit(0)
+            sys.exit(0)
             
     def update_tab(self, event):
         event.widget.update_idletasks()
