@@ -3987,7 +3987,7 @@ class McoBatchDeposit(Shipment):
         self.controller = controller
         
         #set # of items that will be included per batch. 
-        self.batch_size = 2
+        self.batch_size = 50
         
         #set up temp folder and shelve
         self.mco_report_dir = os.path.join(self.ship_dir, 'mco_reports')
@@ -4040,7 +4040,7 @@ class McoBatchDeposit(Shipment):
                 continue
 
             #set identifier variable
-            self.controller.identifier.set(barcode.value.strip())
+            self.controller.identifier.set(str(barcode.value).strip())
             
             #set up DigitalObject
             current_item = DigitalObject(self.controller)
