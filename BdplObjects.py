@@ -4104,11 +4104,11 @@ class McoBatchDeposit(Shipment):
             
             #assign values in item_info dict
             self.item_info = {'BDPLID' : current_item.identifier, 
-                            'ID_Type_3' : 'BDPL ID', 
+                            'ID_Type_3' : 'BDPL Identifier', 
                             'CollectionID' : current_item.current_dict.get('collection_id', ''),
-                            'ID_Type_1' : 'Collection ID',  
+                            'ID_Type_1' : 'Collection Identifier',  
                             'AccessionID' : current_item.current_dict.get('accession_number', ''), 
-                            'ID_Type_2' : 'Accession ID', 
+                            'ID_Type_2' : 'Accession Identifier', 
                             'Title' : item_title, 
                             'Creator' : current_item.current_dict['collection_creator'], 
                             'DateIssued' : date_issued, 
