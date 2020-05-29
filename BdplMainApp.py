@@ -51,7 +51,7 @@ class BdplMainApp(tk.Tk):
 
         self.bdpl_work_dir = bdpl_work_dir
         self.bdpl_archiver_drive = bdpl_archiver_drive
-        self.bdpl_archiver_spool_dir = os.path.join(self.bdpl_archiver_drive, 'Archiver_spool')
+        self.bdpl_archiver_spool_dir = os.path.join(self.bdpl_archiver_drive, 'archiver-spool-test')
         self.bdpl_archiver_general_dir = os.path.join(self.bdpl_archiver_spool_dir, 'general%2fmediaimages')
         self.bdpl_archiver_completed_spreadsheets = os.path.join(self.bdpl_archiver_drive, 'spreadsheets', 'completed_shipments')
         

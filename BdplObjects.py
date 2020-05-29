@@ -2472,8 +2472,8 @@ class Spreadsheet(Shipment):
             self.wb = openpyxl.load_workbook(self.spreadsheet)
             
         if self.__class__.__name__ == 'MasterSpreadsheet':
-            item_ws = self.wb['Item']
-            cumulative_ws = self.wb['Cumulative']
+            self.item_ws = self.wb['Item']
+            self.cumulative_ws = self.wb['Cumulative']
             
         elif self.__class__.__name__ == 'Spreadsheet':
             self.inv_ws = self.wb['Inventory']
@@ -3274,7 +3274,7 @@ class SdaBatchDeposit(Shipment):
             return (status, msg)
         
         #verify master spreadsheet
-        status, msg = self.master_spreadsheet.verify_self.master_spreadsheet()
+        status, msg = self.master_spreadsheet.verify_master_spreadsheet()
         if not status:
             return (status, msg)
                 
@@ -3372,6 +3372,24 @@ class SdaBatchDeposit(Shipment):
         
         return (True, 'Ready to deposit!')
     
+    def check_mco_status(self, identifier):
+        #check to see if we have already started MCO deposit; if not, return False
+        mco_report_dir = os.path.join(self.ship_dir, 'mco_reports')
+        if not os.path.exists(mco_report_dir):
+            return False
+        
+        #check if current identifier is already recorded in 'master_list'
+        mco_status = os.path.join(mco_report_dir, 'mco_status')
+        with shelve.open(mco_status) as db:
+            
+            #make sure we have our master_list; if identifier is in it, return True
+            if db.get('master_list'):
+                if identifier in db['master_list']:
+                    return True
+                    
+        #otherwise, return False
+        return False
+    
     def deposit_barcodes_to_sda(self):
         
         for item in self.status_db['directory_barcodes']:
@@ -3394,14 +3412,8 @@ class SdaBatchDeposit(Shipment):
             if not current_item.identifier in self.status_db['started']:
                 self.write_db('started', current_item.identifier)
             
-            '''Check final_appraisal information for disposition of content'''
-            ###ALSO CHECK IF BARCODE IS IN AN 'MCO-COMPLETED' LIST...
-            if 'mco' in current_item.current_dict['final_appraisal'].lower():
-                print('\n\nContent will be deposited to Media Collections Online. Moving on to next item...')
-                self.write_db('mco_deposit', current_item.identifier)
-                continue
-                
-            elif current_item.current_dict['final_appraisal'] == "Delete content":
+            '''Check final_appraisal information for disposition of content'''                
+            if current_item.current_dict['final_appraisal'] == "Delete content":
                 try:
                     print('\n\tContent will not be transferred to SDA.  Continuing with next item.')
                     shutil.move(current_item.barcode_dir, self.deaccession_dir)
@@ -3412,9 +3424,16 @@ class SdaBatchDeposit(Shipment):
                         
                 continue
             
-            #allow for additional transfer instructions (i.e., transfer to both MCO and SDA)
             elif 'transfer' and 'sda' in current_item.current_dict['final_appraisal'].lower():
-                        
+                
+                #check if item will also be transferred to MCO
+                if 'mco' in current_item.current_dict['final_appraisal'].lower():
+                
+                    if not self.check_mco_status(current_item.identifier): 
+                        print('\n\nContent will be deposited to Media Collections Online. Moving on to next item...')
+                        self.write_db('mco_deposit', current_item.identifier)
+                        continue
+                
                 '''PREPARE ITEM: VERIFY CONTENT IS PRESENT AND GET STATS'''
                 if not current_item.identifier in self.status_db['prepped']:
                     
@@ -4066,9 +4085,6 @@ class McoBatchDeposit(Shipment):
             else:
                 print('\n\tPreparing for deposit to MCO...')
             
-            #add identifier to our tracking lists
-            self.status_db['master_list'].append(current_item.identifier)
-            
             #set up a temp dict to store info
             self.item_info = {}
                         
@@ -4275,6 +4291,9 @@ class McoBatchDeposit(Shipment):
                     else:
                         #add file to our copy list
                         self.status_db[self.current_batch_list].append(mco_file_full_path)
+            
+            #add identifier to our tracking list
+            self.status_db['master_list'].append(current_item.identifier)
                         
             #save info to manifest
             self.current_manifest.write_row(list(self.item_info.values()))
