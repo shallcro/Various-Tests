@@ -2499,7 +2499,10 @@ class Spreadsheet(Shipment):
     def return_row(self, ws):
         #set initial Boolean value to false; change to True if barcode is found
         found = False
-        row = self.app_ws.max_row+1
+        
+        #get max row from supplied worksheet
+        row = ws.max_row+1
+        
         self.identifier = self.controller.identifier.get()
         
         if ws.title in ['Inventory', 'Appraisal', 'Item']:
