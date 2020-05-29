@@ -4104,11 +4104,11 @@ class McoBatchDeposit(Shipment):
             
             #assign values in item_info dict
             self.item_info = {'BDPLID' : current_item.identifier, 
-                            'ID_Type_3' : 'bdpl identifier', 
+                            'ID_Type_1' : 'bdpl identifier', 
                             'CollectionID' : current_item.current_dict.get('collection_id', ''),
-                            'ID_Type_1' : 'collection identifier',  
+                            'ID_Type_2' : 'collection identifier',  
                             'AccessionID' : current_item.current_dict.get('accession_number', ''), 
-                            'ID_Type_2' : 'accession identifier', 
+                            'ID_Type_3' : 'accession identifier', 
                             'Title' : item_title, 
                             'Creator' : current_item.current_dict['collection_creator'], 
                             'DateIssued' : date_issued, 
@@ -4120,6 +4120,12 @@ class McoBatchDeposit(Shipment):
             for k, v in self.item_info.items():
                 if v.lower() in ['-', 'n/a', ' ']:
                     self.item_info[k] = ''
+                    
+            #clear out any accession/collection id labels if we don't have either identifier (no need to add empty fields to MCO)
+            if self.item_info['CollectionID'] == '':
+                self.item_info['ID_Type_2'] = ''
+            if self.item_info['AccessionID'] == '':
+                self.item_info['ID_Type_3'] = ''
             
             #save info
             self.status_db['batch_info'][self.current_batch_no][current_item.identifier] = self.item_info
