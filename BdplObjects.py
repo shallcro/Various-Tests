@@ -3221,6 +3221,9 @@ class SdaBatchDeposit(Shipment):
         
         #set up deposit directories
         self.bag_report_dir = os.path.join(self.ship_dir, 'bag_reports')
+        if not os.path.exists(self.bag_report_dir):
+            os.mkdir(self.bag_report_dir)
+            
         self.deaccession_dir = os.path.join(self.ship_dir, 'deaccessioned')
         self.unaccounted_dir = os.path.join(self.ship_dir, 'unaccounted') 
         self.deposit_dirs = [self.bag_report_dir, self.deaccession_dir, self.unaccounted_dir]
