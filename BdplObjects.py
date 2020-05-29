@@ -3453,7 +3453,7 @@ class SdaBatchDeposit(Shipment):
                         self.status_db['format_report'][current_item.identifier] = {}
                     
                     #get file format info
-                    format_csv = os.path.join(self.reports_dir, 'formatVersions.csv')
+                    format_csv = os.path.join(current_item.reports_dir, 'formatVersions.csv')
                     if os.path.exists(format_csv):
                         with open(format_csv, 'r') as fi:
                             fi = csv.reader(fi)
