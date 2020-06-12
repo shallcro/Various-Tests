@@ -51,6 +51,7 @@ class BdplMainApp(tk.Tk):
 
         self.bdpl_work_dir = bdpl_work_dir
         self.bdpl_archiver_drive = bdpl_archiver_drive
+        #CHANGE WHEN TESTING DONE: self.bdpl_archiver_spool_dir = os.path.join(self.bdpl_archiver_drive, 'Archiver_spool')
         self.bdpl_archiver_spool_dir = os.path.join(self.bdpl_archiver_drive, 'archiver-spool-test')
         self.bdpl_archiver_general_dir = os.path.join(self.bdpl_archiver_spool_dir, 'general%2fmediaimages')
         self.bdpl_archiver_completed_spreadsheets = os.path.join(self.bdpl_archiver_drive, 'spreadsheets', 'completed_shipments')
@@ -195,12 +196,6 @@ class BdplMainApp(tk.Tk):
                 
             if not self.ripstation_ingest_option.get() in ['CDs', 'DVD_Data']:
                 return (False, '\n\nERROR: select RipStation job option before continuing.')
-        
-        #if SDA Deposit, make sure that we have indicated a separations file, if separations_status is True
-        elif self.get_current_tab() == 'Deposit to SDA':
-            if self.separations_status.get():
-                if self.separations_file.get() == '':
-                    return(False, '\n\nERROR: shipment has separations, but file with associated information has not been identified.')
                 
         #if we get through the above, then we are good to go!
         return (True, 'Unit name and shipment date included.')
