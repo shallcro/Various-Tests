@@ -264,8 +264,8 @@ class BdplMainApp(tk.Tk):
         if self.unit_name.get() == '':
             combobox_list = []
         else:
-            unit_home = os.path.join(self.bdpl_work_dir, self.unit_name.get(), 'ingest')
-            combobox_list = glob.glob1(unit_home, '*')
+            folders = os.path.join(self.bdpl_work_dir, self.unit_name.get(), 'ingest')
+            combobox_list = glob.glob1(folders, '*')
         
         combobox['values'] = sorted(combobox_list)
         
@@ -311,7 +311,7 @@ class BdplMainApp(tk.Tk):
             self.separations_file.set('')
             self.separations_status.set(False)
         
-        elif self.get_current_tab() == 'Deposit to MCO':
+        elif self.get_current_tab() in ['Deposit to MCO', 'Deposit to SDA']:
             self.unit_name.set('')
             self.shipment_date.set('')
     
@@ -647,14 +647,31 @@ class BdplIngest(tk.Frame):
         '''
         ITEM METADATA FRAME: display info about our item to BDPL technician
         '''
-        metadata_details = [('Content source:', self.controller.content_source_type), ('Collection title:', self.controller.collection_title), ('Creator:', self.controller.collection_creator), ('Item title:', self.controller.item_title), ('Label transcription', self.controller.label_transcription), ('Item description:', self.controller.item_description), ('Appraisal notes:', self.controller.appraisal_notes), ('Instructions for BDPL:', self.controller.bdpl_instructions)]
+        canvas = tk.Canvas(self.tab_frames_dict['item_metadata_frame'])
+        
+        metadata_scrollbar=ttk.Scrollbar(self.tab_frames_dict['item_metadata_frame'], orient = tk.VERTICAL, command=canvas.yview)
+        
+        metadata_frame = tk.Frame(canvas)
+        metadata_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox('all')
+            )
+        )
+        
+        canvas.create_window((0,0), window=metadata_frame, anchor="nw")
+        canvas.configure(yscrollcommand=metadata_scrollbar.set)
+        
+        canvas.pack(side="left", fill="both", expand=True)
+        metadata_scrollbar.pack(side="right", fill="y")
+        
+        metadata_details = [('Instructions for BDPL:', self.controller.bdpl_instructions), ('Appraisal notes:', self.controller.appraisal_notes), ('Content source:', self.controller.content_source_type), ('Collection title:', self.controller.collection_title), ('Creator:', self.controller.collection_creator), ('Item title:', self.controller.item_title), ('Label transcription', self.controller.label_transcription), ('Item description:', self.controller.item_description)]
         
         c = 0
         for label_, var in metadata_details:
-            l1 = tk.Label(self.tab_frames_dict['item_metadata_frame'], text=label_, anchor='e', justify=tk.RIGHT, width=18)
-            l1.grid(row = c, column=0, padx=(0,5), pady=5)
-            l2 = tk.Label(self.tab_frames_dict['item_metadata_frame'], textvariable=var, anchor='w', justify=tk.LEFT, width=60, wraplength=500)
-            l2.grid(row = c, column=1, padx=5, pady=5)
+            l1 = tk.Label(metadata_frame, text=label_, anchor='e', justify=tk.RIGHT, width=18)
+            l1.grid(row = c, column=0, padx=(0,5))
+            l2 = tk.Label(metadata_frame, textvariable=var, anchor='w', justify=tk.LEFT, width=60, wraplength=500)
+            l2.grid(row = c, column=1, padx=5)
             c+=1
 
     def source_browse(self):
@@ -686,6 +703,8 @@ class BdplIngest(tk.Frame):
         #Standard BDPL Ingest item-based workflow
         
         newscreen()
+        
+        print('\n\nLoading record...')
         
         #make sure main variables--unit_name, shipment_date, and barcode--are included.  Return if either is missing
         status, msg = self.controller.check_main_vars()
@@ -1010,6 +1029,8 @@ class SdaDeposit(tk.Frame):
         self.controller.separations_file.set(sep_file)
         
     def launch_sda_deposit(self):
+    
+        print('\n\nPreparing to deposit batch to SDA...')
 
         current_sda_batch = SdaBatchDeposit(self.controller)
         
@@ -1017,6 +1038,8 @@ class SdaDeposit(tk.Frame):
         if not status:
             messagebox.showwarning(title='WARNING', message=msg, master=self)
             return
+        else:
+            print('\n\nReady to deposit!')
             
         current_sda_batch.deposit_barcodes_to_sda()
 
