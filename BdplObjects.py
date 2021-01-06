@@ -244,7 +244,10 @@ class DigitalObject(Shipment):
         #open spreadsheet and make sure current item exists in spreadsheet; if not, return
         shipment_spreadsheet.open_wb()
         status, row = shipment_spreadsheet.return_row(shipment_spreadsheet.inv_ws)
+        #if status is False, then barcode doesn't exist in spreadsheet.  Close shelve and delete created folders
         if not status:
+            self.db.close()
+            self.delete_folders()
             return (False, '\n\nWARNING: barcode was not found in spreadsheet.  Make sure value is entered correctly and/or check spreadsheet for value.  Consult with digital preservation librarian as needed.')
         
         #load metadata into item object
@@ -343,6 +346,16 @@ class DigitalObject(Shipment):
                     raise
         #create file so we can check for completion later, if need be
         open(self.folders_created, 'w').close()
+    
+    def delete_folders(self):
+        
+        #if file doesn't exist, delete folders
+        for target in self.folders:
+            try:
+                shutil.rmtree(target, ignore_errors=True)
+            except OSError as exception:
+                if exception.errno != errno.EEXIST:
+                    raise
         
     def verify_analysis_details(self): 
     
@@ -2630,14 +2643,6 @@ class Spreadsheet(Shipment):
         current_row = self.return_row(ws)[1]
         
         ws_cols = self.get_spreadsheet_columns(ws)
-        
-        print('Columns:')
-        for k, v in ws_cols.items():
-            print('\t{}\t:\t{}'.format(k, v))
-
-        print('Supplied metadata:')
-        for k, v in current_dict.items():
-            print('\t{}\t:\t{}'.format(k, v))
 
         for key in ws_cols.keys():
             
@@ -2699,7 +2704,21 @@ class MasterSpreadsheet(Spreadsheet):
         self.controller = controller        
         
         self.spreadsheet = self.controller.bdpl_master_spreadsheet
+        '''
+        self.template = os.path.join(self.bdpl_archiver_drive, 'spreadsheets', 'bdpl_master_template.xlsx')
         
+        Create a local copy of template
+        
+        write to this copy
+        
+        When ready to finalize: 
+            open master wb and ws's
+            look for identifiers; either update or add new row
+        
+        OR: just wait until end of process and then write all info to spreadsheet...
+        
+        
+        '''
 class McoSpreadsheet(Spreadsheet):
     def __init__(self, controller, parent):
         Spreadsheet.__init__(self, controller)
@@ -3265,7 +3284,24 @@ class SdaBatchDeposit(Shipment):
             
             for dc in self.db_dicts:
                 self.sda_status_db[dc] = {}         
+    
+    def return_dates(self, list_of_folders):
+    
+        latest_date = datetime.datetime.fromtimestamp(os.stat(max(list_of_folders, key=os.path.getmtime)).st_ctime).strftime('%Y%m%d')
+            
+        earliest_date = datetime.datetime.fromtimestamp(os.stat(min(list_of_folders, key=os.path.getmtime)).st_ctime).strftime('%Y%m%d')
         
+        return (earliest_date, latest_date)
+        
+    def return_duration(self):
+        #calculate total duration for ingest; use 1 day as minimum timedelta
+        tdelta = datetime.datetime.strptime(self.sda_status_db['shipment_stats']['ingest_end_date'], '%Y%m%d') - datetime.datetime.strptime(self.sda_status_db['shipment_stats']['ingest_start_date'], '%Y%m%d')
+        
+        if tdelta < datetime.timedelta(days=1):
+            self.sda_status_db['shipment_stats']['ingest_duration'] = 1
+        else:
+            self.sda_status_db['shipment_stats']['ingest_duration'] = int(str(tdelta).split()[0])
+    
     def prep_sda_batch(self):
         '''
         Check variables and spreadsheets
@@ -3304,13 +3340,8 @@ class SdaBatchDeposit(Shipment):
         #barcodes in ship_dir
         dir_list = [d for d in os.listdir(self.ship_dir) if os.path.isdir(d) and not d in ['review', 'bag_reports', 'sda_reports', 'item_ingest_info', 'unaccounted', 'deaccessioned', 'ripstation_reports', 'mco_reports', 'reports']]
         
-        #if our list is empty, add all dir_list values
-        if len(self.sda_status_db['directory_barcodes']) == 0:
-            self.sda_status_db['directory_barcodes'] = dir_list
-            
-        #otherwise, only add barcodes if they aren;t already in our list of directory_barcodes
-        else:
-            [self.sda_status_db['directory_barcodes'].append(d) for d in dir_list if not d in self.sda_status_db['directory_barcodes']]
+        #add barcodes to our list of directory_barcodes
+        [self.sda_status_db['directory_barcodes'].append(d) for d in dir_list if not d in self.sda_status_db['directory_barcodes']]
         
         #barcodes in shipment spreadsheet
         for barcode in self.shipment_spreadsheet.app_ws['A'][1:]:
@@ -3333,28 +3364,23 @@ class SdaBatchDeposit(Shipment):
                     self.write_db('failed', item, 'Move unaccounted failure\t{}'.format(e))
         
         #get stats on duration of ingest
-        if len(self.sda_status_db['directory_barcodes']) > 0:
-            latest_date = datetime.datetime.fromtimestamp(os.stat(max(self.sda_status_db['directory_barcodes'], key=os.path.getmtime)).st_ctime).strftime('%Y%m%d')
-            
-            earliest_date = datetime.datetime.fromtimestamp(os.stat(min(self.sda_status_db['directory_barcodes'], key=os.path.getmtime)).st_ctime).strftime('%Y%m%d')
         
-            #if we've already recorded duration information, update values; otherwise, add values to shipment_stats dict
-            if self.sda_status_db['shipment_stats'].get('ingest_start_date'):      
-                if earliest_date < self.sda_status_db['shipment_stats']['ingest_start_date']:
-                    self.sda_status_db['shipment_stats']['ingest_start_date'] = earliest_date               
-                if latest_date > self.sda_status_db['shipment_stats']['ingest_end_date']:
-                    self.sda_status_db['shipment_stats']['ingest_end_date'] = latest_date       
-            else:
-                self.sda_status_db['shipment_stats']['ingest_start_date'] = earliest_date
-                self.sda_status_db['shipment_stats']['ingest_end_date'] = latest_date             
+        #if we've already recorded this information, only check current barcode folders...
+        if self.sda_status_db['shipment_stats'].get('ingest_start_date') and len(dir_list) > 0:
         
-            #calculate total duration for ingest; use 1 day as minimum timedelta
-            tdelta = datetime.datetime.strptime(self.sda_status_db['shipment_stats']['ingest_end_date'], '%Y%m%d') - datetime.datetime.strptime(self.sda_status_db['shipment_stats']['ingest_start_date'], '%Y%m%d')
+            earliest_date, latest_date = self.return_dates(dir_list)
             
-            if tdelta < datetime.timedelta(days=1):
-                self.sda_status_db['shipment_stats']['ingest_duration'] = 1
-            else:
-                self.sda_status_db['shipment_stats']['ingest_duration'] = int(str(tdelta).split()[0])
+            if earliest_date < self.sda_status_db['shipment_stats']['ingest_start_date']:
+                self.sda_status_db['shipment_stats']['ingest_start_date'] = earliest_date               
+            if latest_date > self.sda_status_db['shipment_stats']['ingest_end_date']:
+                self.sda_status_db['shipment_stats']['ingest_end_date'] = latest_date   
+        
+        elif not self.sda_status_db['shipment_stats'].get('ingest_start_date') and len(self.sda_status_db['directory_barcodes']) > 0:    
+            self.sda_status_db['shipment_stats']['ingest_start_date'], self.sda_status_db['shipment_stats']['ingest_end_date'] = self.return_dates(self.sda_status_db['directory_barcodes'])
+        
+        #otherwise, record nothing
+        else:
+            pass
             
         #save info
         self.sda_status_db.sync()
@@ -3389,11 +3415,13 @@ class SdaBatchDeposit(Shipment):
             print('\nWorking on item: {}'.format(current_item.identifier))
             
             #continue to next item if we've already completed the item or it's been deaccessioned.
-            for ls in ('completed', 'deaccessioned'):
-                if current_item.identifier in self.sda_status_db[ls]:
-                    print('\n{} already {}.'.format(current_item.identifier, ls))
-                    continue 
-            
+            if current_item.identifier in self.sda_status_db['completed']:
+                print('\n{} already completed'.format(current_item.identifier))
+                continue
+            elif current_item.identifier in self.sda_status_db['deaccessioned']:
+                print('\n{} already deaccessioned'.format(current_item.identifier))
+                continue
+                
             #load metadata
             current_item.load_item_metadata(self.shipment_spreadsheet)
             
@@ -3755,71 +3783,74 @@ class SdaBatchDeposit(Shipment):
             if ls_report != '':
                 print('\t\t{}'.format('\n\t\t'.join(ls_report)))
             
-        '''UPDATE CUMULATIVE INFORMATION'''
-        print('\n\n------------------------------------------------------------\n\nUPDATING MASTER SPREADSHEET')
-        
-        print('\nWriting shipment stats...')
-        
-        #write shipment stats to self.master_spreadsheet
-        self.master_spreadsheet.write_to_spreadsheet(self.sda_status_db['shipment_stats'], self.master_spreadsheet.cumulative_ws)
-        
-        #now write format information to self.master_spreadsheet.  Create new sheet; if it already exists, remove it and rewrite
-        print('\nWriting format information...')
-        
-        puids = 'puids_{}_{}'.format(current_item.unit_name, current_item.shipment_date)
-    
-        #if this puid sheet already exists, we'll just remove it and start anew...
-        if puids in self.master_spreadsheet.wb.sheetnames:
-            self.master_spreadsheet.wb.remove(self.master_spreadsheet.wb[puids])
-        
-        self.master_spreadsheet.puid_ws = self.master_spreadsheet.wb.create_sheet(puids)
-        
-        #set up a header
-        puid_header = []
-        for barcode in self.sda_status_db['format_report']:
-            for puid in self.sda_status_db['format_report'][barcode]:
-                if not puid in puid_header and self.sda_status_db['format_report'][barcode][puid]['count'] > 0:
-                    puid_header.append(puid)
-                    
-        #natural-order sort the header
-        self.sort_puids(puid_header)
-        
-        #insert 'barcode' as the first item in list
-        puid_header.insert(0, 'barcode')
-        
-        #append header to puid sheet
-        self.master_spreadsheet.puid_ws.append(puid_header)
-        
-        #create a dictionary to use to refer to puid columns in the sheet.  Add 1 to index, as 1st column is 1 (not 0) in openpyxl
-        puid_cols = {}
-        [puid_cols.update( {x : puid_header.index(x)+1} ) for x in puid_header]
-        
-        #now loop through all barcodes
-        for barcode in self.sda_status_db['format_report']:
-            #get a new row for each barcode; write in barcode value
-            row = self.master_spreadsheet.puid_ws.max_row+1
+        '''UPDATE CUMULATIVE INFORMATION--if we have completed SIPs'''
+        if self.sda_status_db['shipment_stats']['sip_count'] > 0:
             
-            self.master_spreadsheet.puid_ws.cell(row=row, column=puid_cols['barcode'], value=barcode)
+            print('\n\n------------------------------------------------------------\n\nUPDATING MASTER SPREADSHEET')
             
-            #loop through the puids of each barcode; write count to spreadsheet
-            for puid in self.sda_status_db['format_report'][barcode]:
-                if self.sda_status_db['format_report'][barcode][puid]['count'] < 1:
-                    continue   
-                self.master_spreadsheet.puid_ws.cell(row=row, column=puid_cols[puid], value=self.sda_status_db['format_report'][barcode][puid]['count'])
+            print('\nWriting shipment stats...')
+            
+            #write shipment stats to self.master_spreadsheet
+            self.master_spreadsheet.write_to_spreadsheet(self.sda_status_db['shipment_stats'], self.master_spreadsheet.cumulative_ws)
+            
+            #if we have any puids, write that format information to self.master_spreadsheet. Create new sheet; if it already exists, remove it and rewrite
+            
+            print('\nWriting format information...')
+            
+            puids = 'puids_{}_{}'.format(current_item.unit_name, current_item.shipment_date)
+        
+            #if this puid sheet already exists, we'll just remove it and start anew...
+            if puids in self.master_spreadsheet.wb.sheetnames:
+                self.master_spreadsheet.wb.remove(self.master_spreadsheet.wb[puids])
+            
+            self.master_spreadsheet.puid_ws = self.master_spreadsheet.wb.create_sheet(puids)
+            
+            #set up a header
+            puid_header = []
+            for barcode in self.sda_status_db['format_report']:
+                for puid in self.sda_status_db['format_report'][barcode]:
+                    if not puid in puid_header and self.sda_status_db['format_report'][barcode][puid]['count'] > 0:
+                        puid_header.append(puid)
+                        
+            #natural-order sort the header
+            self.sort_puids(puid_header)
+            
+            #insert 'barcode' as the first item in list
+            puid_header.insert(0, 'barcode')
+            
+            #append header to puid sheet
+            self.master_spreadsheet.puid_ws.append(puid_header)
+            
+            #create a dictionary to use to refer to puid columns in the sheet.  Add 1 to index, as 1st column is 1 (not 0) in openpyxl
+            puid_cols = {}
+            [puid_cols.update( {x : puid_header.index(x)+1} ) for x in puid_header]
+            
+            #now loop through all barcodes
+            for barcode in self.sda_status_db['format_report']:
+                #get a new row for each barcode; write in barcode value
+                row = self.master_spreadsheet.puid_ws.max_row+1
                 
-        #Finally, tally the total # of each PUID in the shipment
-        row = self.master_spreadsheet.puid_ws.max_row+1
-        self.master_spreadsheet.puid_ws.cell(row=row, column=1, value='Totals:')
-        
-        #loop through sheet and sum each column
-        #Parameters for iter_cols: min_col=None, max_col=None, min_row=None, max_row=None
-        for col in self.master_spreadsheet.puid_ws.iter_cols(2, self.master_spreadsheet.puid_ws.max_column, 2, self.master_spreadsheet.puid_ws.max_row):
-            count = 0
-            for c in col:
-                if not c.value is None:
-                    count += c.value
-                    colno = c.column
-            self.master_spreadsheet.puid_ws.cell(row=row, column=colno, value=count)
+                self.master_spreadsheet.puid_ws.cell(row=row, column=puid_cols['barcode'], value=barcode)
+                
+                #loop through the puids of each barcode; write count to spreadsheet
+                for puid in self.sda_status_db['format_report'][barcode]:
+                    if self.sda_status_db['format_report'][barcode][puid]['count'] < 1:
+                        continue   
+                    self.master_spreadsheet.puid_ws.cell(row=row, column=puid_cols[puid], value=self.sda_status_db['format_report'][barcode][puid]['count'])
+                    
+            #Finally, tally the total # of each PUID in the shipment
+            row = self.master_spreadsheet.puid_ws.max_row+1
+            self.master_spreadsheet.puid_ws.cell(row=row, column=1, value='Totals:')
+            
+            #loop through sheet and sum each column
+            #Parameters for iter_cols: min_col=None, max_col=None, min_row=None, max_row=None
+            for col in self.master_spreadsheet.puid_ws.iter_cols(2, self.master_spreadsheet.puid_ws.max_column, 2, self.master_spreadsheet.puid_ws.max_row):
+                count = 0
+                for c in col:
+                    if not c.value is None:
+                        count += c.value
+                        colno = c.column
+                self.master_spreadsheet.puid_ws.cell(row=row, column=colno, value=count)
         
         #save self.master_spreadsheet; add a copy to SDA
         self.master_spreadsheet.wb.save(self.master_spreadsheet.spreadsheet)

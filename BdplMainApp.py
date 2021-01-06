@@ -34,7 +34,7 @@ import uuid
 import webbrowser
 import zipfile
 
-# from dfxml project
+# import from dfxml project
 import Objects
 
 #BDPL files
@@ -56,6 +56,7 @@ class BdplMainApp(tk.Tk):
         self.bdpl_archiver_general_dir = os.path.join(self.bdpl_archiver_spool_dir, 'general%2fmediaimages')
         self.bdpl_archiver_completed_spreadsheets = os.path.join(self.bdpl_archiver_drive, 'spreadsheets', 'completed_shipments')
         
+        #store IP addresses for storage locations in a local file
         self.addresses = 'C:/BDPL/resources/addresses.txt'
         with open(self.addresses, 'r') as f:
             self.ip_addresses = f.read().splitlines()
@@ -167,6 +168,8 @@ class BdplMainApp(tk.Tk):
         elif self.bdpl_notebook.tab(self.bdpl_notebook.select(), 'text') in ['Deposit to SDA']:
             if not self.checked_servers['bdpl_archiver']:
                 self.check_connection("bdpl_archiver")
+        
+        self.clear_gui()
         
     def check_main_vars(self):
         if self.unit_name.get() == '':
@@ -1038,8 +1041,6 @@ class SdaDeposit(tk.Frame):
         if not status:
             messagebox.showwarning(title='WARNING', message=msg, master=self)
             return
-        else:
-            print('\n\nReady to deposit!')
             
         current_sda_batch.deposit_barcodes_to_sda()
 
