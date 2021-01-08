@@ -1203,6 +1203,7 @@ class McoDeposit(tk.Frame):
         mco_batch.update_mco_format_list()
         
     def prep_mco_deposit(self):
+        #this method preps the MCO spreadsheet(s) and any associated XML files with title/timestamp info
         
         #make sure variables have been entered
         status, msg = self.controller.check_main_vars()

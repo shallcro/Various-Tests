@@ -129,12 +129,13 @@ class Shipment(Unit):
             return (False, '\n\nWARNING: {} is currently open.  Close file before continuing and/or contact digital preservation librarian if other users are involved.'.format(self.spreadsheet))
 
 class DigitalObject(Shipment):
-    def __init__(self, controller):
+    def __init__(self, controller, skip_folders=False):
         Shipment.__init__(self, controller)
         self.controller = controller
         self.identifier = self.controller.identifier.get()
+        self.skip_folders = skip_folders
 
-        '''SET UP FOLDERS'''
+        '''SET VARIABLES'''
         #main folders
         self.barcode_dir = os.path.join(self.ship_dir, self.identifier)
         self.image_dir = os.path.join(self.barcode_dir, "disk-image")
@@ -146,7 +147,6 @@ class DigitalObject(Shipment):
         self.bulkext_dir = os.path.join(self.barcode_dir, "bulk_extractor")
         self.folders = [self.barcode_dir, self.image_dir, self.files_dir, self.metadata_dir, self.temp_dir, self.reports_dir, self.log_dir, self.bulkext_dir, self.media_image_dir]
 
-        '''SET UP FILES'''
         #assets
         self.imagefile = os.path.join(self.image_dir, '{}.dd'.format(self.identifier))
         self.paranoia_out = os.path.join(self.files_dir, '{}.wav'.format(self.identifier))
@@ -200,8 +200,8 @@ class DigitalObject(Shipment):
         self.dfxml_output = os.path.join(self.metadata_dir, '{}-dfxml.xml'.format(self.identifier))
         self.premis_xml_file = os.path.join(self.metadata_dir, '{}-premis.xml'.format(self.identifier))
         
-        #create folders
-        if not self.check_ingest_folders(): 
+        #create folders; we will skip this step when moving content to MCO or SDA
+        if not self.skip_folders and not self.check_ingest_folders(): 
             self.create_folders() 
         
         #set up shelve
@@ -318,7 +318,7 @@ class DigitalObject(Shipment):
                     else:
                         _val = ws.cell(row=row, column=ws_columns[key]).value
                         
-                        if _val is None or str(_val).lower() in [' ', 'n/a', 'none']:
+                        if _val is None or str(_val).lower() in [' ', '', 'n/a', 'none']:
                             self.db['info'][key] = '-'
                         else:
                             self.db['info'][key] = _val
@@ -2735,12 +2735,12 @@ class McoSpreadsheet(Spreadsheet):
         deposit_date = datetime.datetime.today().strftime('%Y-%m-%d')
         
         #get the unit liaison for the shipment
-        if not self.parent.status_db.get('unit_liaison'):
-            self.parent.status_db['unit_liaison'] = self.parent.shipment_spreadsheet.get_unit_liaison()
+        if not self.parent.mco_status_db.get('unit_liaison'):
+            self.parent.mco_status_db['unit_liaison'] = self.parent.shipment_spreadsheet.get_unit_liaison()
         
         #set up headers
         description = 'BDPL deposit to MCO: {} shipment {}, batch {} ({})'.format(self.unit_name, self.shipment_date, str(self.parent.current_batch_no).zfill(2), deposit_date)
-        contact_info = self.parent.status_db.get('unit_liaison', 'micshall@iu.edu')
+        contact_info = self.parent.mco_status_db.get('unit_liaison', 'micshall@iu.edu')
         
         reference_info = [description, contact_info]
         self.mco_ws.append(reference_info)
@@ -2803,7 +2803,7 @@ class ManualPremisEvent(tk.Toplevel):
             tk.Button(self.get_info_frame, text = 'Use barcode', bg='light slate gray', command=self.add_barcode_value).grid(row=1, column=0, padx=10, pady=10, sticky="nsew")
             tk.Button(self.get_info_frame, text = 'Cancel', bg='light slate gray', command=self.close_top).grid(row=1, column=1, padx=10, pady=10, sticky="nsew")
         
-        self.barcode_item = DigitalObject(self.controller)
+        self.current_item = DigitalObject(self.controller)
 
         self.event_frame = tk.LabelFrame(self, text='Item Barcode: {}'.format(self.controller.identifier.get()))
         self.event_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
@@ -2856,7 +2856,7 @@ class ManualPremisEvent(tk.Toplevel):
             ttk.Radiobutton(self.timestamp_frame, text = i[0], variable = self.timestamp_source, value = i[1], command=self.get_timestamp).grid(row=c, column=0, padx=10, pady=10, sticky='w')
             c += 1
         
-        self.notice = ttk.Label(self.timestamp_frame, text='NOTE: folder contents will be copied to {}'.format(self.barcode_item.files_dir), wraplength=250)
+        self.notice = ttk.Label(self.timestamp_frame, text='NOTE: folder contents will be copied to {}'.format(self.current_item.files_dir), wraplength=250)
         
         tk.Button(self.button_frame, text = 'Save Event', bg='light slate gray', command=self.create_manual_premis_event).grid(row=1, column=1, padx=20, pady=10, sticky="nsew")
         tk.Button(self.button_frame, text = 'Quit / Cancel', bg='light slate gray', command=self.close_top).grid(row=1, column=2, padx=20, pady=10, sticky="nsew")
@@ -2924,14 +2924,14 @@ class ManualPremisEvent(tk.Toplevel):
         vers = '{} v{}'.format(self.current_event['event_software'].get(), self.current_event['event_software_version'].get())
         
         #save info in our 'premis list' for the item 
-        self.barcode_item.record_premis(self.timestamp, self.manual_event.get(), 0, self.current_event['event_command'].get(), event_desc, vers)
+        self.current_item.record_premis(self.timestamp, self.manual_event.get(), 0, self.current_event['event_command'].get(), event_desc, vers)
         
         #if this is a replication event and we've identified a folder, move the folder.  We will also remove any existing DFXML file
         if self.manual_event.get() == 'replication' and self.timestamp_source.get() == 'folder':
-            shutil.move(self.selected_dir, self.barcode_item.files_dir)
+            shutil.move(self.selected_dir, self.current_item.files_dir)
             
-            if os.path.exists(self.barcode_item.dfxml_output):
-                os.remove(self.barcode_item.dfxml_output)
+            if os.path.exists(self.current_item.dfxml_output):
+                os.remove(self.current_item.dfxml_output)
                 
         print('\nPreservation action ({}) has been succesfully added to PREMIS metadata.')
         
@@ -3408,9 +3408,9 @@ class SdaBatchDeposit(Shipment):
         
         for item in self.sda_status_db['directory_barcodes']:
 
-            #set identifier variable; create barcode object
+            #set identifier variable; create DigitalObject with 'True' to skip folder creation
             self.controller.identifier.set(item.strip())
-            current_item = DigitalObject(self.controller)
+            current_item = DigitalObject(self.controller, True)
             
             print('\nWorking on item: {}'.format(current_item.identifier))
             
@@ -4076,14 +4076,14 @@ class McoBatchDeposit(Shipment):
 
     def prep_batches_for_mco(self):
         
-        #set up resources to track progress
+        #set up resources to track progress; 'master_list' records every barcode we work with (easy to look up!)
         if not 'master_list' in list(self.mco_status_db.keys()):
             self.mco_status_db['master_list'] = []
-            
+        
+        #if 'batch_info' isn't in mco_status_db, add it; this is a dictionary, which tracks each batch and associated identifiers
         if not 'batch_info' in list(self.mco_status_db.keys()):
             self.mco_status_db['batch_info'] = {}
             self.current_batch_no = 0
-            #since this is the first time through, set up new_batch resources
             self.new_batch()
             
         else:
@@ -4111,23 +4111,21 @@ class McoBatchDeposit(Shipment):
             #set identifier variable
             self.controller.identifier.set(str(barcode.value).strip())
             
-            #set up DigitalObject
-            current_item = DigitalObject(self.controller)
+            #create DigitalObject with 'True' to skip folder creation
+            current_item = DigitalObject(self.controller, True)
             
             #skip if we've already completed item or if barcode_dir doesn't exist
             if current_item.identifier in self.mco_status_db['master_list'] or not os.path.exists(current_item.barcode_dir):
                 continue
-            
-            print('\n\nCURRENT ITEM: {}'.format(current_item.identifier))
             
             #load metadata if we've made it this far...
             current_item.load_item_metadata(self.shipment_spreadsheet)
             
             #skip if not designated for MCO
             if not 'mco' in current_item.db['info']['final_appraisal'].lower():
-                print('\n\tDo not deposit to MCO')
                 continue
             else:
+                print('\n\nCURRENT ITEM: {}'.format(current_item.identifier))
                 print('\n\tPreparing for deposit to MCO...')
             
             #set up a temp dict to store info
@@ -4149,11 +4147,17 @@ class McoBatchDeposit(Shipment):
                 item_description = ''
             
             #set date_issued
-            if current_item.db['info'].get('assigned_dates') and current_item.db['info']['assigned_dates'].lower() not in ['', '-', 'n/a', 'none']:
+            #check if we have a year in 'assigned dates' field; if so, make sure date is formatted correctly
+            if current_item.db['info'].get('assigned_dates') and sum(str.isdigit(d) for d in current_item.db['info']['assigned_dates']) >= 4:
                 date_issued = current_item.db['info']['assigned_dates'].replace(' ', '').replace('-', '/')
             else:
+            #if there's no 'assigned_dates', we'll use begin/end dates extracted from content
                 if current_item.db['info']['begin_date'] == current_item.db['info']['end_date']:
-                    date_issued = current_item.db['info']['begin_date'].replace('undated', '')
+                    #if no value provided for date, use 'undated'
+                    if current_item.db['info']['begin_date'] == '-':
+                        date_issued = 'undated'
+                    else:
+                        date_issued = current_item.db['info']['begin_date']
                 else:
                     date_issued = "{}/{}".format(current_item.db['info']['begin_date'], current_item.db['info']['end_date'])
             
@@ -4179,7 +4183,7 @@ class McoBatchDeposit(Shipment):
             
             #try to clear out any bad data
             for k, v in self.item_info.items():
-                if v.lower() in ['-', 'n/a', ' ', 'none']:
+                if str(v).lower() in ['-', 'n/a', ' ', 'none']:
                     self.item_info[k] = ''
                     
             #clear out any accession/collection id labels if we don't have either identifier (no need to add empty fields to MCO)
@@ -4411,6 +4415,9 @@ class McoBatchDeposit(Shipment):
         self.failed_list = 'failed_{}'.format(str(self.current_batch_no).zfill(2))
         if not self.mco_status_db.get(self.failed_list):
             self.mco_status_db[self.failed_list] = []
+            
+        #sync our db shelve
+        self.mco_status_db.sync()
         
         #create manifest oject; set up spreadsheet if it doesn't already exist
         self.current_manifest = McoSpreadsheet(self.controller, self)
@@ -4606,7 +4613,7 @@ class McoBatchPicker(tk.Toplevel):
         for batch in self.batches:
             ttk.Label(self.current_batch_frame, text=str(batch).zfill(2)).grid(row=r, column=1, padx=10, pady=2)
             
-            if batch in self.parent.status_db['moved_batches']:
+            if batch in self.parent.mco_status_db['moved_batches']:
                 ttk.Label(self.current_batch_frame, text='Completed').grid(row=r, column=2, padx=10, pady=2)
             else:
                 rb = ttk.Radiobutton(self.current_batch_frame, variable = self.selected_batch, value = batch)
@@ -4684,14 +4691,14 @@ class McoFormatTracker(tk.Toplevel):
         
     def close_top(self):
         #close shelve
-        self.parent.status_db.close()
+        self.parent.mco_status_db.close()
         
         self.destroy()
         
     def restore_defaults(self):
         self.parent.self.status_db['audio_formats'] = ['.wav']
         self.status_db['video_formats'] = ['.mkv', '.mpg']
-        self.parent.status_db.sync()
+        self.parent.mco_status_db.sync()
         
         self.update_format_frame()
         
@@ -4709,7 +4716,7 @@ class McoFormatTracker(tk.Toplevel):
         self.current_format_frame.pack(fill=tk.BOTH, expand=True)
         
         #figure out max height of columns
-        separator_height = max(len(self.parent.status_db['audio_formats']), len(self.parent.status_db['video_formats'])) + 2
+        separator_height = max(len(self.parent.mco_status_db['audio_formats']), len(self.parent.mco_status_db['video_formats'])) + 2
         
         #add headers
         ttk.Label(self.current_format_frame, text='Audio').grid(row=0, column=1, padx=(10, 5), pady=(10,2))
@@ -4736,7 +4743,7 @@ class McoFormatTracker(tk.Toplevel):
                 
             r=2
             
-            for fmt in self.parent.status_db['{}_formats'.format(type)]:
+            for fmt in self.parent.mco_status_db['{}_formats'.format(type)]:
                 
                 dct[fmt] = tk.BooleanVar()
                 
@@ -4771,8 +4778,8 @@ class McoFormatTracker(tk.Toplevel):
                     fmt = fmt.strip()
                     
                     #add new formats to our format list
-                    if not fmt in self.parent.status_db['{}_formats'.format(type)]:
-                        self.parent.status_db['{}_formats'.format(type)].append(fmt)
+                    if not fmt in self.parent.mco_status_db['{}_formats'.format(type)]:
+                        self.parent.mco_status_db['{}_formats'.format(type)].append(fmt)
         
         #check if any current formats have been removed; loop through checkbuttons and associated fmts
         for dct, type in [(self.audio_cb_vars, 'audio'), (self.video_cb_vars, 'video')]:
@@ -4780,16 +4787,16 @@ class McoFormatTracker(tk.Toplevel):
                 
                 #if any checkbuttons have been selected, remove format from our list
                 if status.get():
-                    self.parent.status_db['{}_formats'.format(type)].remove(fmt)
+                    self.parent.mco_status_db['{}_formats'.format(type)].remove(fmt)
                     
                     #reset the checkbox while we're at it
                     status.set(False)
         
         #re-sort our list of fmts
         for type in ['audio', 'video']:
-            self.parent.status_db['{}_formats'.format(type)].sort()
+            self.parent.mco_status_db['{}_formats'.format(type)].sort()
             
-        self.parent.status_db.sync()
+        self.parent.mco_status_db.sync()
         
         #now refresh our displayed format list
         self.update_format_frame()
