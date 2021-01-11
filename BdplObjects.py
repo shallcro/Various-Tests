@@ -4345,7 +4345,7 @@ class McoBatchDeposit(Shipment):
             #if both our file lists are empty, write error so that we can track later; continue to next item and do not write to batch manifest
             if len(self.mco_status_db['video_file_list'] + self.mco_status_db['audio_file_list']):
                 self.mco_status_db['failed_prep'].append(current_item.identifier)
-                continue()
+                continue
                 
             
             #add identifier to our tracking list
