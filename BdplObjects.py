@@ -4051,7 +4051,7 @@ class McoBatchDeposit(Shipment):
         self.controller = controller
         
         #set # of items that will be included per batch. 
-        self.batch_size = 50
+        self.batch_size = 3
         
         #set up temp folder and shelve
         self.mco_report_dir = os.path.join(self.ship_dir, 'mco_reports')
@@ -4087,6 +4087,7 @@ class McoBatchDeposit(Shipment):
             self.new_batch()
             
         else:
+            #if we've already worked on this shipment before, check to see what the current batch # is
             self.current_batch_no = max(1, len(self.mco_status_db['batch_info']))     
 
             self.current_batch_list = 'batch-list_{}'.format(str(self.current_batch_no).zfill(2))
@@ -4121,7 +4122,7 @@ class McoBatchDeposit(Shipment):
             #load metadata if we've made it this far...
             current_item.load_item_metadata(self.shipment_spreadsheet)
             
-            #skip if not designated for MCO
+            #skip item/spreadsheet row if not designated for MCO
             if not 'mco' in current_item.db['info']['final_appraisal'].lower():
                 continue
             else:
@@ -4341,13 +4342,29 @@ class McoBatchDeposit(Shipment):
                         #add file to our copy list
                         self.mco_status_db[self.current_batch_list].append(mco_file_full_path)
             
+            #if both our file lists are empty, write error so that we can track later; continue to next item and do not write to batch manifest
+            if len(self.mco_status_db['video_file_list'] + self.mco_status_db['audio_file_list']):
+                self.mco_status_db['failed_prep'].append(current_item.identifier)
+                continue()
+                
+            
             #add identifier to our tracking list
             self.mco_status_db['master_list'].append(current_item.identifier)
-                        
+            
+            #if item had previously been on our failed prep list but we know have the files, remove the identifier from our list
+            if current_item.identifier in self.mco_status_db['failed_prep']:
+                self.mco_status_db['failed_prep'].remove(current_item.identifier)
+                    
             #save info to manifest
             self.current_manifest.write_row(list(self.item_info.values()))
             
-        print('\n\n----------------------------------------------------------------------------------------------------\n\nMCO preparation complete. Run "move" operation after review of MCO spreadsheet(s).')
+        print('\n\n----------------------------------------------------------------------------------------------------\n\nMCO preparation complete.')
+        
+        if len(self.mco_status_db['failed_prep']) > 0:
+            print('\n\nThe following items should be transferred to MCO, but no files in the appropriate formats were identified:\n\t{}'.format('\n\t'.join(self.mco_status_db['failed_prep'])))
+            
+        
+        print('\n\nRun "move" operation after review of MCO spreadsheet(s).')
         
         #close shelve
         self.mco_status_db.close()   
@@ -4411,10 +4428,13 @@ class McoBatchDeposit(Shipment):
         if not self.current_batch_list in list(self.mco_status_db.keys()):
             self.mco_status_db[self.current_batch_list] =[]
             
-        #set up a list to track any failed operations
-        self.failed_list = 'failed_{}'.format(str(self.current_batch_no).zfill(2))
-        if not self.mco_status_db.get(self.failed_list):
-            self.mco_status_db[self.failed_list] = []
+        #set up lists to track any failed operations
+        self.failed_move_list = 'failed_move_{}'.format(str(self.current_batch_no).zfill(2))
+        if not self.mco_status_db.get(self.failed_move_list):
+            self.mco_status_db[self.failed_move_list] = []
+        
+        if not self.mco_status_db.get('failed_prep'):
+            self.mco_status_db['failed_prep'] = []
             
         #sync our db shelve
         self.mco_status_db.sync()
@@ -4482,7 +4502,7 @@ class McoBatchDeposit(Shipment):
                 self.copy_content(file)
         
         #if no failures, copy over our manifest
-        if len(self.mco_status_db[self.failed_list]) == 0:
+        if len(self.mco_status_db[self.failed_move_list]) == 0:
             mco_file = '{}/{}'.format(self.mco_destination, os.path.basename(self.current_manifest.spreadsheet))
             
             self.mco_client.sftp.put(self.current_manifest.spreadsheet, mco_file)
@@ -4494,10 +4514,10 @@ class McoBatchDeposit(Shipment):
             messagebox.showinfo(title='Batch Complete', message='Batch {} has been successfully moved.  Move next batch after this one has completed MCO ingest.'.format(self.current_batch_no))
         
         else:
-            if len(self.mco_status_db[self.failed_list]) == 1:
+            if len(self.mco_status_db[self.failed_move_list]) == 1:
                 fail_message = '1 file'
             else:
-                fail_message = '{} files'.format(len(self.mco_status_db[self.failed_list]))
+                fail_message = '{} files'.format(len(self.mco_status_db[self.failed_move_list]))
                 
             messagebox.showwarning(title='Batch Failed', message='{} failed to copy to the MCO dropbox. Make sure content is in shipment directory and try again.'.format(fail_message))         
     
@@ -4524,7 +4544,7 @@ class McoBatchDeposit(Shipment):
             self.mco_client.sftp.put(file, mco_file)
             print(' ... Success!')
         except:
-            self.mco_status_db[self.failed_list].append(file)
+            self.mco_status_db[self.failed_move_list].append(file)
             print(' ... Operation failed :(')
 
 class McoBatchPicker(tk.Toplevel):
