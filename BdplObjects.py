@@ -4484,6 +4484,11 @@ class McoBatchDeposit(Shipment):
         else:
             #set up our batch resources: assign variables to current_batch_list and MCO manifest
             self.new_batch(batch_no)
+        
+        #Exit function if there are no files to move.
+        if len(self.mco_status_db[self.current_batch_list]) == 0:
+            messagebox.showwarning(title='Empty Batch', message='No files associated with batch # {}. Verify target file formats and run batch preparation again, if necessary.'.format(batch_no))
+            return
             
         print('\nMoving files (batch {}) to {}...'.format(self.current_batch_no, self.mco_destination))
         
