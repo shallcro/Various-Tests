@@ -4051,7 +4051,7 @@ class McoBatchDeposit(Shipment):
         self.controller = controller
         
         #set # of items that will be included per batch. 
-        self.batch_size = 3
+        self.batch_size = 50
         
         #set up temp folder and shelve
         self.mco_report_dir = os.path.join(self.ship_dir, 'mco_reports')

@@ -58,6 +58,7 @@ class BdplMainApp(tk.Tk):
         self.bdpl_archiver_completed_spreadsheets = os.path.join(self.bdpl_archiver_drive, 'spreadsheets', 'completed_shipments')
         
         #store IP addresses for storage locations in a local file
+        #line 0: IP address and path for BDPL workspace; line 1: IP address and path for main BDPL folder (access to Archiver); line 2: name of server for Avalon dropbox; line 3: path (from root) to Avalon dropbox folder
         self.addresses = 'C:/BDPL/resources/addresses.txt'
         with open(self.addresses, 'r') as f:
             self.ip_addresses = f.read().splitlines()
