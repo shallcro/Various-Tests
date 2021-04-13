@@ -30,6 +30,11 @@ def main():
     barcode = input('Enter barcode: ')
     ship_dir = input('Enter path to shipment directory: ')
     scan_dir = input('Enter path to target directory: ')
+    list_done = input('Is file list already compiled? (Y/N) ')
+    if list_done.lower() == 'y':
+        list_done = True
+    else:
+        list_done = False
     
     list_of_files = os.path.join('Z:/bdpl_transfer_lists', '{}.txt'.format(barcode))
     
@@ -47,12 +52,15 @@ def main():
         
     cut_path = input('Trim source path at this point: ')
     
-    file_list()
+    if not list_done:
+        file_list()
     copy_files()
     extract_zips()
     
 
 def file_list():
+    
+    print('\n\nCreating a list of files to be copied...')
 
     avoid_ext = []
 
@@ -61,8 +69,6 @@ def file_list():
     avoid_files = []
 
     avoid_dirs = []
-    
-    zfl = open(zip_file_list, 'w')
 
     with open(list_of_files, 'w', encoding='utf8') as f:
 
@@ -91,17 +97,14 @@ def file_list():
                 if len(avoid_dirs) > 0:
                     if any(i in os.path.dirname(target) for i in avoid_dirs):
                         continue
-                        
-                if file_ext == '.zip':
-                    zfl.write('{}\n'.format(target))
                     
                 f.write('{}\n'.format(target))
-        
-    zfl.close()
     
     print('\nFile list is compiled!')
 
 def copy_files():
+
+    zfl = open(zip_file_list, 'w', encoding='utf8')
     
     header = ['File', 'Source CRC', 'Destination CRC', 'Time']
     
@@ -111,20 +114,16 @@ def copy_files():
         writer = csv.writer(o_f, lineterminator='\n')
         writer.writerow(header)        
         
-        print('Reviewing list....\n\n')
+        print('Reviewing copy list....\n\n')
         
         with open(list_of_files, 'r', encoding='utf8') as i_f:
             counter = 0
             temp_list = i_f.read().splitlines()
             total = len(temp_list)
             
-            for file in temp_list:
+            for file in temp_list:                    
             
                 counter += 1
-                
-                print('Working on file {} of {}'.format(counter, total))
-                
-                crc_source = crc32(file)
                 
                 rel_path = os.path.relpath(os.path.dirname(file), cut_path)
                 
@@ -132,6 +131,14 @@ def copy_files():
                 
                 moved_file = os.path.join(dest_path, os.path.basename(file))
                 
+                if os.path.exists(moved_file):
+                    continue
+
+                print('Working on file {} of {} ({})'.format(counter, total, file))
+                
+                crc_source = crc32(file)
+                
+                                
                 if not os.path.exists(dest_path):
                     os.makedirs(dest_path)
                     
@@ -158,6 +165,11 @@ def copy_files():
                 info = [moved_file, crc_source, crc_dest, timestamp]
                 writer.writerow(info)
                 
+                if os.path.splitext(moved_file)[1].lower() == '.zip':
+                    zfl.write('{}\n'.format(moved_file))
+    
+    zfl.close()
+                
     if copy_error:
         print('\nCheck errors and manually copy files as needed')
     else:
@@ -166,8 +178,8 @@ def copy_files():
     temp_dict = {}
     temp_dict['eventType'] = 'replication'
     temp_dict['eventOutcomeDetail'] = 0
-    temp_dict['timestamp'] = timestamp
-    temp_dict['eventDetailInfo'] = "python copy.shutil with CRC32 hash comparison".format(file, dir_name)
+    temp_dict['timestamp'] = str(datetime.datetime.now())
+    temp_dict['eventDetailInfo'] = "python copy.shutil with CRC32 hash comparison"
     temp_dict['eventDetailInfo_additional'] = "The process of creating a copy of an object that is, bit-wise, identical to the original."
     temp_dict['linkingAgentIDvalue'] = 'python 3.7.3'
     
@@ -195,12 +207,11 @@ def extract_zips():
             return
             
         counter = 0
-        for file in f.read().splitlines():
+        for file in f_ls:
             counter +=1
             
             print('\nWorking on .zip {} of {} ({})'.format(counter, total, file))
                     
-            barcode = file.split('/')[4]
             dir_name = os.path.splitext(file)[0]
                 
             if os.path.exists(dir_name):

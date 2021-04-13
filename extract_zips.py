@@ -4,29 +4,30 @@ import shelve
 import datetime
 import csv
 
-ship_dir = 'Z:/UAC/ingest/20210309'
-item_info = 'Z:/UAC/ingest/20210309/item_ingest_info'
-# out = 'C:/temp/bdpl_zip.txt'
-# o_f = open(out, 'a')
-# for d in os.listdir(item_info):
-    # target = os.path.join(item_info, d, 'files')
-    # if os.path.exists(target):
-        # for root, dirs, files in os.walk(target):
-            # for f in files:
-                # z_ip = os.path.join(root, f).replace(os.sep, os.altsep)
-                # if os.path.splitext(z_ip)[1].lower() == '.zip':
-                    # o_f.write('{}\n'.format(z_ip))
-# o_f.close()
+ship_dir = input('shipment dir: ')
+barcode = input('barcode: ')
+item_info = os.path.join(ship_dir, 'item_ingest_info')
+files_dir = os.path.join(ship_dir, barcode, 'files')
+
+out = 'C:/temp/bdpl_zip.txt'
+o_f = open(out, 'w', encoding='utf8')
+for root, dirs, files in os.walk(files_dir):
+    for file in files:
+        z_ip = os.path.join(root, file).replace(os.sep, os.altsep)
+        if os.path.splitext(z_ip)[1].lower() == '.zip':
+            o_f.write('{}\n'.format(z_ip))
+            
+o_f.close()
 
 existing = []
 barcode_list = []
 error_list = []
 
-with open('C:/temp/bdpl_zip.txt', 'r') as f:
+with open('C:/temp/bdpl_zip.txt', 'r', encoding='utf8') as f:
     for file in f.read().splitlines():
         print('\nWorking on:', file)
                 
-        barcode = file.split('/')[4]
+        #barcode = file.split('/')[4]
         dir_name = os.path.splitext(file)[0]
             
         if os.path.exists(dir_name):
